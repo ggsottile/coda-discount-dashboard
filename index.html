@@ -132,6 +132,15 @@ select{cursor:pointer;appearance:none;padding-right:var(--sp8);background-image:
 .charm-sug:hover{background:var(--pri);color:var(--inv)}
 .charm-all{float:right;font-size:9px;font-weight:700;color:var(--pri);border:1px solid var(--border);border-radius:var(--r-full);padding:2px 9px;text-transform:none;letter-spacing:0;margin-left:6px}
 .charm-all:hover{border-color:var(--pri);background:var(--pri-hl)}
+.optim-explainer{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-xl);padding:var(--sp5);display:flex;flex-direction:column;gap:var(--sp3);box-shadow:var(--sh-sm);margin-top:var(--sp2)}
+.optim-explainer-head{font-size:12px;font-weight:700;letter-spacing:-.005em}
+.optim-explainer-list{padding-left:1.15em;display:flex;flex-direction:column;gap:6px;font-size:12px;line-height:1.55;color:var(--text)}
+.optim-explainer-list li{margin:0}
+.charm-overview{font-size:12px;color:var(--muted);background:var(--offset);border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--sp2) var(--sp4);cursor:help;white-space:pre-line}
+.charm-overview strong{color:var(--text)}
+.optim-btn-row{display:flex;gap:var(--sp3);flex-wrap:wrap}
+.charm-all-btn{font-size:12px;font-weight:700;color:var(--pri);border:1px solid var(--pri);border-radius:var(--r-lg);padding:var(--sp3) var(--sp5);text-transform:none;letter-spacing:0;background:var(--pri-hl);transition:background var(--tr),color var(--tr)}
+.charm-all-btn:hover{background:var(--pri);color:var(--inv)}
 .anchor-toggle{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;cursor:pointer;white-space:nowrap}
 .anchor-toggle input{margin:0}
 .anchor-toggle:has(input:checked){color:var(--pri)}
@@ -454,11 +463,17 @@ function priceQuality(skuId, pct){
    smallest move away from what the user actually typed. */
 function bestNearby(skuId, pct, window){
   window = window || 5;
-  const cur = priceQuality(skuId, pct).score;
+  // Anything that isn't held as an anchor must always end up with a nonzero
+  // discount, so 0% itself is never a valid candidate. If the rate is
+  // currently 0%, treat its "current score" as unbeatable-low so the search
+  // is forced to move to the first nonzero candidate it finds rather than
+  // reporting "already fine."
+  const forceOffZero = pct === 0;
+  const cur = forceOffZero ? -1 : priceQuality(skuId, pct).score;
   let best = null;
   for(let step=1; step<=window; step++){
     for(const cand of [pct-step, pct+step]){
-      if(cand < 0 || cand > 90) continue;
+      if(cand < 1 || cand > 90) continue;
       const q = priceQuality(skuId, cand);
       if(q.score > cur && (!best || q.score > best.score)) best = { pct:cand, score:q.score, clean:q.clean };
     }
@@ -473,6 +488,38 @@ function qualityTooltip(skuId, pct){
        + '\n\nEnding quality ' + q.score + '/' + MAX_QUALITY
        + '\nSteam declares a charm ending (.99) only for USD, EUR, GBP and CAD,'
        + '\nso those four count toward the headline and carry double weight.';
+}
+
+/* "Charmed enough" overview — same clean>=2 boundary the row chips already use
+   to split charm-mid from charm-bad, so the headline count agrees with the
+   colors in the rows below it. Covers all 9 RATE_FIELDS SKUs (base included —
+   it still gets scored even though it's strategy-locked and never auto-moved)
+   plus the 3 bundle final prices, for 12 items total. bundlePriceQuality()
+   is defined further down (after bundleSumAtCcy); this function is only ever
+   called after the whole script has loaded, so the forward reference is fine. */
+const CHARM_ENOUGH_CLEAN = 2;
+function charmOverviewStats(d){
+  const items = [];
+  RATE_FIELDS.forEach(r => {
+    if(!r.sku) return;
+    const pct = getPct(d, r.field);
+    const q = priceQuality(r.sku, pct);
+    items.push({ label:r.label, clean:q.clean, total:q.total, ok:q.clean >= CHARM_ENOUGH_CLEAN });
+  });
+  Object.entries(EDITIONS).forEach(([edId, ed]) => {
+    const pct = getPct(d, ed.bundleField);
+    const q = bundlePriceQuality(edId, pct, d);
+    items.push({ label:ed.name + ' (final price)', clean:q.clean, total:q.total, ok:q.clean >= CHARM_ENOUGH_CLEAN });
+  });
+  const okCount = items.filter(i => i.ok).length;
+  return { items, okCount, total: items.length };
+}
+function renderCharmOverview(d){
+  const s = charmOverviewStats(d);
+  const tooltip = s.items.map(i => (i.ok?'✓ ':'✗ ') + i.label + ' — ' + i.clean + '/' + i.total + ' clean').join('\n');
+  return `<div class="charm-overview" id="charm-overview" title="${esc(tooltip)}">
+    <strong>${s.okCount} of ${s.total}</strong> SKUs/bundles currently have a charmed-enough price (2+ of 4 charm currencies clean) &mdash; hover for the breakdown
+  </div>`;
 }
 
 const ALL_EDITABLE_FIELDS = new Set([...RATE_FIELDS, ...BUNDLE_RATE_FIELDS].map(r => r.field));
@@ -891,9 +938,19 @@ function rateRowHtml(d, r, withCharm){
 function renderRatesPanel(d){
   const rateRows = RATE_FIELDS.map(r => rateRowHtml(d, r, true)).join('');
   const bundleRows = BUNDLE_RATE_FIELDS.map(r => rateRowHtml(d, r, false)).join('');
-  return `<div class="section-title">Discount Rates (Layer 1 \u2014 per SKU)
-    <button id="charm-all" class="charm-all" title="Snap the DLC and extras rates to the nearest percentage whose prices end more cleanly, weighted toward USD, EUR, GBP and CAD \u2014 the four currencies where Steam declares a charm ending. The base game rate is set by pricing strategy and is left alone.">Propose cleaner price endings</button>
-    <button id="anchor-autofill" class="charm-all" title="Check one or more SKUs above as anchors. This fills every other SKU rate, and the three bundle extras, with the best-scoring charm percentage that does not exceed the deepest historical discount of your checked anchors.">Auto-fill from anchors</button>
+  return `<div class="section-title">Discount Rates (Layer 1 \u2014 per SKU)</div>
+  <div class="optim-explainer">
+    <div class="optim-explainer-head">How the optimization buttons work</div>
+    <ul class="optim-explainer-list">
+      <li><strong>Propose cleaner price endings</strong> nudges each DLC/extra rate a few points up or down to the nearest percentage that makes prices end more cleanly (closer to .99), weighted toward USD, EUR, GBP and CAD \u2014 the four currencies where Steam declares a charm ending. It never proposes 0%, and it leaves the base game alone since that rate is set by pricing strategy, not by charm pricing.</li>
+      <li><strong>Auto-fill from anchors</strong> takes the SKU(s) you've checked as \u201canchor\u201d, finds the deepest discount any of them has ever actually run, and fills every other SKU rate plus all three bundle extras with the cleanest-ending percentage up to that ceiling. Anchors are never touched, and nothing is ever auto-filled to 0%.</li>
+      <li>The Complete Edition's bundle extra is always chosen so its final price lands closer to the Supporter Edition's price than to the Campaigns Edition's \u2014 Complete sits between them, and its pricing should reflect that.</li>
+    </ul>
+    ${renderCharmOverview(d)}
+    <div class="optim-btn-row">
+      <button id="charm-all" class="charm-all-btn" title="Snap the DLC and extras rates to the nearest percentage whose prices end more cleanly, weighted toward USD, EUR, GBP and CAD \u2014 the four currencies where Steam declares a charm ending. The base game rate is set by pricing strategy and is left alone. Never proposes 0%.">Propose cleaner price endings</button>
+      <button id="anchor-autofill" class="charm-all-btn" title="Check one or more SKUs above as anchors. This fills every other SKU rate, and the three bundle extras, with the best-scoring charm percentage that does not exceed the deepest historical discount of your checked anchors. Never fills in 0%.">Auto-fill from anchors</button>
+    </div>
   </div>
   <div class="anchor-status" id="anchor-status"></div>
   <div class="rates-panel">${rateRows}</div>
@@ -956,6 +1013,12 @@ function renderSteam(d){
 function refreshPrices(d){
   const area = document.getElementById('price-area');
   if(area) area.innerHTML = renderSteam(d);
+  const ov = document.getElementById('charm-overview');
+  if(ov){
+    const s = charmOverviewStats(d);
+    ov.innerHTML = '<strong>' + s.okCount + ' of ' + s.total + '</strong> SKUs/bundles currently have a charmed-enough price (2+ of 4 charm currencies clean) &mdash; hover for the breakdown';
+    ov.title = s.items.map(i => (i.ok?'✓ ':'✗ ') + i.label + ' — ' + i.clean + '/' + i.total + ' clean').join('\n');
+  }
   RATE_FIELDS.forEach(r => {
     if(!r.sku) return;
     const row = document.getElementById('rateinput-'+r.field);
@@ -1100,9 +1163,13 @@ function computeCeilingFromAnchors(d, anchorSkuIds){
   return { ceiling, missing };
 }
 function bestUnderCeiling(skuId, ceiling){
-  const top = Math.max(0, Math.min(90, Math.floor(ceiling)));
+  // Never propose 0% — anything not held as an anchor must carry a nonzero
+  // discount. If the ceiling itself rounds down to 0 (an anchor that has
+  // apparently never actually been discounted), still search 1% so the rule
+  // holds rather than leaving this SKU un-filled.
+  const top = Math.max(1, Math.min(90, Math.floor(ceiling)));
   let best = null;
-  for(let pct=0; pct<=top; pct++){
+  for(let pct=1; pct<=top; pct++){
     const q = priceQuality(skuId, pct);
     if(!best || q.score > best.score || (q.score === best.score && pct > best.pct)){
       best = { pct, score:q.score, clean:q.clean };
@@ -1138,15 +1205,53 @@ function bundlePriceQuality(edId, pct, d){
   }
   return { score, clean, total:charmSeen };
 }
-function bestBundleUnderCeiling(edId, d, ceiling){
-  const top = Math.max(0, Math.min(90, Math.floor(ceiling)));
-  let best = null;
-  for(let pct=0; pct<=top; pct++){
+/* Final bundle price at a candidate bundle-extra %, in one reference currency.
+   Used both by the Complete/Supporter/Campaigns closeness constraint below and
+   by anything else that needs "what would this bundle actually cost." */
+function finalBundlePriceAt(edId, pct, d, ccy){
+  const ed = EDITIONS[edId];
+  const sum = bundleSumAtCcy(ed, d, ccy);
+  return steamRound(sum*(1-pct/100), ccy, 'bundle');
+}
+/* closeness (optional): { ccy, nearPrice, farPrice } — used only for the
+   Complete Edition, whose bundle extra must land its final price closer to
+   nearPrice (Supporter's final price) than to farPrice (Campaigns'). Candidates
+   that satisfy the constraint are ranked purely by charm score as usual; if
+   NONE satisfy it within the ceiling (a tight/unusual ceiling), fall back to
+   the candidates that come closest to satisfying it, then rank those by charm
+   score — so the constraint is honored as strictly as the ceiling allows. */
+function bestBundleUnderCeiling(edId, d, ceiling, closeness){
+  // Same nonzero rule as bestUnderCeiling: bundle extras are never anchors,
+  // so they must never be auto-filled to 0% either.
+  const top = Math.max(1, Math.min(90, Math.floor(ceiling)));
+  let candidates = [];
+  for(let pct=1; pct<=top; pct++){
     const q = bundlePriceQuality(edId, pct, d);
-    if(!best || q.score > best.score || (q.score === best.score && pct > best.pct)){
-      best = { pct, score:q.score, clean:q.clean };
+    candidates.push({ pct, score:q.score, clean:q.clean });
+  }
+  let pool = candidates;
+  if(closeness){
+    const withGap = candidates.map(c => {
+      const price = finalBundlePriceAt(edId, c.pct, d, closeness.ccy);
+      const distNear = Math.abs(price - closeness.nearPrice);
+      const distFar = Math.abs(price - closeness.farPrice);
+      return Object.assign({}, c, { satisfies: distNear < distFar, gap: distNear - distFar });
+    });
+    const ok = withGap.filter(c => c.satisfies);
+    if(ok.length){
+      pool = ok;
+    } else {
+      // Nothing under the ceiling gets there — pick the pct(s) that get
+      // closest to satisfying the constraint, then rank those by charm score.
+      const sorted = withGap.slice().sort((a,b) => a.gap - b.gap);
+      const bestGap = sorted[0].gap;
+      pool = sorted.filter(c => c.gap === bestGap);
     }
   }
+  let best = null;
+  pool.forEach(c => {
+    if(!best || c.score > best.score || (c.score === best.score && c.pct > best.pct)) best = c;
+  });
   return best;
 }
 function autoFillFromAnchors(d){
@@ -1174,14 +1279,24 @@ function autoFillFromAnchors(d){
     if(el){ el.value = best.pct; el.dataset.baseline = String(best.pct); }
     if(best.pct !== cur){ moved.push(r.label + ': ' + cur + '% → ' + best.pct + '%'); doSave(d, r.field, best.pct); }
   });
-  Object.entries(EDITIONS).forEach(([edId, ed]) => {
-    const best = bestBundleUnderCeiling(edId, d, ceiling);
+  // Campaigns and Supporter first (their final prices are the reference points
+  // Complete has to sit between), Complete last so it can be pulled closer to
+  // Supporter than to Campaigns using their now-final rates.
+  const bundleOrder = ['campaigns', 'supporter', 'complete'];
+  const finalUSD = {};
+  bundleOrder.forEach(edId => {
+    const ed = EDITIONS[edId];
+    const closeness = edId === 'complete'
+      ? { ccy:'USD', nearPrice: finalUSD.supporter, farPrice: finalUSD.campaigns }
+      : null;
+    const best = bestBundleUnderCeiling(edId, d, ceiling, closeness);
     if(!best) return;
     const cur = getPct(d, ed.bundleField);
     d[ed.bundleField] = best.pct;
     const el = document.getElementById('rateinput-'+ed.bundleField);
     if(el){ el.value = best.pct; el.dataset.baseline = String(best.pct); }
     if(best.pct !== cur){ moved.push(ed.name + ' bundle extra: ' + cur + '% → ' + best.pct + '%'); doSave(d, ed.bundleField, best.pct); }
+    finalUSD[edId] = finalBundlePriceAt(edId, best.pct, d, 'USD');
   });
   refreshPrices(d);
   const anchorNames = anchorSkus.map(s => SKU_LABELS[s] || s).join(', ');
