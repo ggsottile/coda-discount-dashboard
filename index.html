@@ -130,6 +130,1215 @@ select{cursor:pointer;appearance:none;padding-right:var(--sp8);background-image:
 .charm-locked{font-size:9px;font-weight:700;letter-spacing:.02em;color:var(--muted);border:1px dashed var(--border);border-radius:var(--r-full);padding:1px 6px;white-space:nowrap;cursor:help}
 .charm-sug{font-size:9px;font-weight:700;color:var(--pri);border:1px solid var(--pri);border-radius:var(--r-full);padding:1px 6px;white-space:nowrap}
 .charm-sug:hover{background:var(--pri);color:var(--inv)}
+.charm-all{float:right;font-size:9px;font-weight:700;color:var(--pri);border:1px solid var(--border);border-radius:var(--r-full);padding:2px 9px;text-transform:none;letter-spacing:0;margin-left:6px}
+.charm-all:hover{border-color:var(--pri);background:var(--pri-hl)}
+.anchor-toggle{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;cursor:pointer;white-space:nowrap}
+.anchor-toggle input{margin:0}
+.anchor-toggle:has(input:checked){color:var(--pri)}
+.anchor-status{font-size:11px;color:var(--muted);margin:2px 0 6px;min-height:14px}
+.anchor-status.warn{color:var(--warn)}
+.save-status.dirty{color:var(--warn)}
+.save-status{font-size:10px;font-weight:600;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;min-width:70px}
+.save-status.saved{color:var(--succ)}
+.save-status.saving{color:var(--muted)}
+.save-status.error{color:var(--err)}
+.save-status .retry-btn{text-decoration:underline;cursor:pointer}
+
+@media(max-width:900px){.cards-grid{grid-template-columns:1fr}.base-card{flex-direction:column;align-items:flex-start}}
+</style>
+</head>
+<body>
+<header class="hdr">
+  <div class="logo">
+    <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
+      <rect width="28" height="28" rx="7" fill="var(--pri)" opacity=".15"/>
+      <rect width="28" height="28" rx="7" fill="none" stroke="var(--pri)" stroke-width="1.5" opacity=".4"/>
+      <circle cx="9" cy="17" r="3" fill="var(--pri)"/><circle cx="19" cy="14" r="3" fill="var(--pri)"/>
+      <line x1="12" y1="17" x2="12" y2="28" stroke="var(--pri)" stroke-width="1.8" stroke-linecap="round"/>
+      <line x1="22" y1="14" x2="22" y2="25" stroke="var(--pri)" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>
+    <span class="logo-text">Songs of Silence</span>
+  </div>
+  <div style="width:1px;height:18px;background:var(--divider);margin:0 4px"></div>
+  <span class="hdr-sub">Discount Overview Dashboard</span>
+  <div class="hdr-meta">
+    <span>remote control productions GmbH</span>
+    <button class="theme-btn" data-theme-toggle aria-label="Switch theme">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="main">
+  <div id="load-error-banner" class="banner err">
+    <span id="load-error-text">⚠ Could not load live data from the Discount Feed sheet.</span>
+    <button id="retry-load-btn">Retry now</button>
+  </div>
+  <div id="sync-banner" class="banner warn">
+    <span>⚠ <span class="sync-count">0</span> edit(s) saved on this device but not yet synced to the sheet.</span>
+    <button id="retry-all-btn">Retry sync now</button>
+  </div>
+
+  <div class="ctrl-bar">
+    <div class="ctrl-bar-top">
+      <span class="ctrl-title">Filters</span>
+      <div class="ctrl-group">
+        <span class="ctrl-label">Platform</span>
+        <select id="platform-sel" onchange="onPlatformChange()">
+          <option value="steam">Steam</option>
+          <option value="xbox">Xbox [WIP]</option>
+          <option value="ps5">PS5 [WIP]</option>
+        </select>
+      </div>
+      <span class="ctrl-flow" id="disc-flow-arrow">→</span>
+      <div class="ctrl-group" id="discount-group">
+        <span class="ctrl-label">Discount name / period</span>
+        <select id="discount-sel" onchange="onDiscountChange()"></select>
+      </div>
+      <span class="ctrl-flow" id="curr-flow-arrow" style="display:none">→</span>
+      <div class="ctrl-group" id="currency-group" style="display:none">
+        <span class="ctrl-label">Currency</span>
+        <select id="currency-sel" onchange="onCurrencyChange()">
+          <option value="USD">USD · United States</option>
+          <option value="EUR">EUR · Europe</option>
+          <option value="GBP">GBP · United Kingdom</option>
+          <option value="CNY">CNY · China</option>
+          <option value="RUB">RUB · Russia</option>
+          <option value="UAH">UAH · Ukraine</option>
+          <option value="CAD">CAD · Canada</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div id="loading-state" class="empty-state">Loading discount data from Google Sheet…</div>
+  <div id="empty-state" class="empty-state" style="display:none">No discounts scheduled yet for this platform.</div>
+  <div id="wip-state" class="wip-state" style="display:none">🚧 Xbox/PS5 pricing is not yet operational in v1.0 — Steam is fully supported. Come back once console pricing is scoped.</div>
+  <div id="content-area" style="display:flex;flex-direction:column;gap:var(--sp5)"></div>
+
+  <div class="rationale-anchor">Longer discussion and comments continue below in Coda ↓</div>
+
+  <div class="notes">
+    <div class="note-i"><span class="ndot" style="background:var(--pri)"></span>SKU base prices are locked and <strong>baked into this build</strong> — changing them means re-deploying this file, not editing the sheet</div>
+    <div class="note-i"><span class="ndot" style="background:var(--succ)"></span>Prices match the Steam store: base prices pulled live 2026-09-02, discount rounding floors to the currency's minor unit (verified 49/49 against the store)</div>
+    <div class="note-i"><span class="ndot" style="background:var(--purple)"></span>PM rationale is read-only here — edit it in the <strong>pm_rationale</strong> column of the Discount Feed sheet</div>
+    <div class="note-i"><span class="ndot" style="background:var(--gold)"></span>Discount rates are live — edits sync to the Discount Feed Google Sheet; the whole dashboard reloads from that sheet on every page refresh</div>
+    <div class="note-i"><span class="ndot" style="background:var(--purple)"></span>Charm pricing is a constraint, not a target: the base game rate is <strong>strategy-set</strong>, so the chip reports its endings but never proposes moving it. Steam forces one discount % across all currencies, so a .99 in <em>every</em> currency is usually impossible. Steam declares a charm ending (.99) only for <strong>USD, EUR, GBP and CAD</strong> — none for CNY, RUB or UAH — so the chips count clean endings among those four. Hover for all seven</div>
+    <div class="note-i"><span class="ndot" style="background:var(--warn)"></span>Max 8 discount entries shown per platform · older ones are archived, not deleted</div>
+  </div>
+</main>
+
+<script>
+/* ======================================================================
+   CONFIG
+   ====================================================================== */
+const CONFIG = {
+  readUrl: 'https://n8n.rcp.family/webhook/discount-feed-read',
+  writeUrl: 'https://n8n.rcp.family/webhook/discount-feed-update',
+  debounceMs: 900,
+  // Name of the n8n "Header Auth" header. Must match both webhook nodes.
+  tokenHeader: 'X-Feed-Token'
+};
+
+/* ======================================================================
+   ACCESS TOKEN  —  capability URL, not a password
+   ----------------------------------------------------------------------
+   The host (Cloudflare / GitHub Pages, free tier) serves this file
+   publicly, so NOTHING secret can live in it. Instead the token arrives
+   in the URL fragment:
+
+       https://<host>/#t=THE_TOKEN
+
+   A fragment is never sent to any server, never appears in HTTP logs and
+   never leaks via Referer — but page JS can read it. So the public HTML
+   stays secret-free while the n8n webhooks stop being open to the world.
+   The token lives in the Coda Embed block's URL; whoever can see that
+   Coda page can use the dashboard.
+
+   This is a bearer capability, NOT per-user identity:
+     * anyone holding the URL can use it, and can pass it on
+     * it does not tell you WHO edited (that is `edited_by`, self-reported)
+     * to revoke, change the value in n8n and update the Coda embed URL
+     * it will sit in browser history and bookmarks
+
+   INERT until Header Auth is switched on in n8n: with no #t= in the URL
+   no header is sent and everything behaves exactly as before.
+   ====================================================================== */
+function getAccessToken(){
+  try{
+    const m = /(?:^|[#&])t=([^&]+)/.exec(location.hash || '');
+    if(m) { lsSet('sos_feed_token', decodeURIComponent(m[1])); return decodeURIComponent(m[1]); }
+  }catch(e){}
+  return lsGet('sos_feed_token') || null;   // remembered so a reload without the hash still works
+}
+function authHeaders(extra){
+  const h = Object.assign({}, extra || {});
+  const t = getAccessToken();
+  if(t) h[CONFIG.tokenHeader] = t;
+  return h;
+}
+
+/* ---------------- STATIC CATALOG (locked SKU base prices, per currency) ---------------- */
+const WHOLE_NUMBER_CCY = new Set(['RUB','UAH']); // CNY is 2dp on Steam (verified: base ¥98 @55% = ¥44.10, not ¥44)
+const CATALOG = {
+  USD:{ base:29.99, ck:10.99, cc:12.99, le:7.89, ost:9.99, artbook:9.99, luminant:19.99, starborn:4.99, firstborn:4.99 },
+  EUR:{ base:29.99, ck:10.99, cc:12.99, le:7.89, ost:9.99, artbook:9.99, luminant:19.99, starborn:4.99, firstborn:4.99 },
+  GBP:{ base:24.99, ck:9.89, cc:9.99, le:6.69, ost:8.50, artbook:8.50, luminant:16.99, starborn:4.29, firstborn:4.29 },
+  CAD:{ base:38.99, ck:12.99, cc:15.99, le:11.99, ost:12.99, artbook:12.99, luminant:25.99, starborn:6.49, firstborn:6.49 },
+  CNY:{ base:98.00, ck:38.00, cc:42.00, le:28.00, ost:42.00, artbook:42.00, luminant:67.00, starborn:18.00, firstborn:18.00 },
+  RUB:{ base:1300, ck:449, cc:499, le:350, ost:385, artbook:385, luminant:770, starborn:195, firstborn:195 },
+  UAH:{ base:600, ck:220, cc:235, le:150, ost:225, artbook:225, luminant:299, starborn:125, firstborn:125 }
+};
+const SKU_LABELS = {
+  base:'Base Game', ck:'Crownless King Expansion', cc:'Celestial Church Expansion', le:'Lighteaters DLC',
+  ost:'Official Soundtrack', artbook:'Digital Artbook', luminant:'Luminant Supporter Upgrade',
+  starborn:'Starborn Supporter Upgrade', firstborn:'Firstborn Supporter Upgrade'
+};
+// Each SKU's discount % comes from its own sheet column. cc = Celestial Church = dlc2.
+// ck = Crownless King = dlc3. luminant/starborn/firstborn all share cosmetics_discount_pct.
+const SKU_FIELD_MAP = {
+  base:'base_game_discount_pct', le:'lighteaters_discount_pct', cc:'dlc2_discount_pct', ck:'dlc3_discount_pct',
+  ost:'ost_discount_pct', artbook:'artbook_discount_pct',
+  luminant:'luminant_discount_pct', starborn:'starborn_discount_pct', firstborn:'firstborn_discount_pct'
+};
+/* The three Supporter Upgrades used to share one column, cosmetics_discount_pct.
+   They are three separate Steam SKUs, so they now have a column each. Until
+   those columns exist in the sheet the old shared column is used as a fallback,
+   so the dashboard works whichever order things are deployed in. */
+const FIELD_FALLBACK = {
+  luminant_discount_pct:'cosmetics_discount_pct',
+  starborn_discount_pct:'cosmetics_discount_pct',
+  firstborn_discount_pct:'cosmetics_discount_pct'
+};
+function getPct(d, field){
+  let v = d[field];
+  if(v===undefined || v===null || v==='' ){
+    const fb = FIELD_FALLBACK[field];
+    if(fb) v = d[fb];
+  }
+  const n = parseFloat(v);
+  return isNaN(n) ? 0 : n;
+}
+/* ---------------- ANCHOR / AUTO-FILL CEILING ----------------
+   Sheet tab "9. Coda Discount Feed Database" carries one ceiling column per
+   non-locked Layer 1 SKU: <sku>_ceiling_pct = the deepest discount % that SKU
+   has ever actually run, filled in by hand (SteamDB is Cloudflare-protected
+   and refuses automated access, so this is not auto-fetched). Blank means
+   "no data yet", not "0% ceiling" — getCeiling returns null for that, and
+   callers must treat null as "can't compute a ceiling", never as 0.
+   Three bundle_extra_ceiling_pct_<edition> columns also exist in the sheet,
+   reserved for a future per-bundle ceiling; v1 of Auto-fill applies the one
+   ceiling derived from the checked SKU anchors to the bundle extras too. */
+const CEILING_FIELD_MAP = {
+  le:'le_ceiling_pct', cc:'cc_ceiling_pct', ck:'ck_ceiling_pct', ost:'ost_ceiling_pct', artbook:'artbook_ceiling_pct',
+  luminant:'luminant_ceiling_pct', starborn:'starborn_ceiling_pct', firstborn:'firstborn_ceiling_pct'
+};
+function getCeiling(d, field){
+  if(!field) return null;
+  const v = d[field];
+  if(v===undefined || v===null || v==='') return null;
+  const n = parseFloat(v);
+  return isNaN(n) ? null : n;
+}
+const EDITIONS = {
+  campaigns:{ name:'Campaigns Edition', badge:'campaigns', desc:'Base game + Crownless King + Celestial Church', skus:['base','ck','cc'], bundleField:'bundle_extra_discount_pct_campaigns' },
+  complete:{ name:'Complete Edition', badge:'complete', desc:'Everything: base + all DLCs + extras', skus:['base','le','ck','cc','artbook','ost'], bundleField:'bundle_extra_discount_pct_complete' },
+  supporter:{ name:'Supporter Edition', badge:'supporter', desc:'Complete Edition + all Supporter Upgrades', skus:['base','le','ck','cc','artbook','ost','luminant','starborn','firstborn'], bundleField:'bundle_extra_discount_pct_supporter' }
+};
+// The editable rate fields shown in the "Discount Rates" panel, one row per unique sheet column.
+const RATE_FIELDS = [
+  { sku:'base', field:'base_game_discount_pct', label:'Base Game' },
+  { sku:'le', field:'lighteaters_discount_pct', label:'Lighteaters DLC' },
+  { sku:'cc', field:'dlc2_discount_pct', label:'Celestial Church Expansion' },
+  { sku:'ck', field:'dlc3_discount_pct', label:'Crownless King Expansion' },
+  { sku:'ost', field:'ost_discount_pct', label:'Official Soundtrack' },
+  { sku:'artbook', field:'artbook_discount_pct', label:'Digital Artbook' },
+  { field:'luminant_discount_pct', label:'Luminant Supporter Upgrade', sku:'luminant' },
+  { field:'starborn_discount_pct', label:'Starborn Supporter Upgrade', sku:'starborn' },
+  { field:'firstborn_discount_pct', label:'Firstborn Supporter Upgrade', sku:'firstborn' }
+];
+const BUNDLE_RATE_FIELDS = [
+  { field:'bundle_extra_discount_pct_campaigns', label:'Campaigns Edition — bundle extra' },
+  { field:'bundle_extra_discount_pct_complete', label:'Complete Edition — bundle extra' },
+  { field:'bundle_extra_discount_pct_supporter', label:'Supporter Edition — bundle extra' }
+];
+/* ======================================================================
+   PRICE ENDING QUALITY  ("charm pricing", tiered)
+   ----------------------------------------------------------------------
+   Steam applies ONE percentage to seven different base prices and floors
+   each result, so a percentage giving .99 in every currency generally does
+   not exist. Measured on the live catalogue, strict .99 peaks at 3 of 7 for
+   the base game and 1 of 7 for Crownless King.
+
+   So instead of pass/fail on .99, endings are ranked — and only the
+   currencies where Steam itself declares a convention drive the ranking.
+
+   TWO SOURCES, both in the Dynamic Pricing Tool workbook:
+
+   1. Sheet "3. Steam Defaults" is Steam's own per-currency metadata. Its
+      "Charm Ending" column is explicit:
+          USD EUR GBP CAD  ->  2 decimals, round unit 1.00, charm ending 0.99
+          CNY RUB UAH      ->  0 decimals, no round unit, NO charm ending
+      Steam declares a charm convention for exactly four of our seven.
+
+   2. Sheet "7. Raw Data" holds 738 observed live Steam prices across titles
+      and regions. Endings of the LIST prices:
+          USD  .99 x78  .49 x24  .09 x3  .79 x2  .29 x1  .89 x1
+          GBP  .99 x17  (every single one)
+          CAD  .99 x15  .49 x1   .28 x1
+          CNY  ...0 x18 (whole yuan)
+          RUB  ...0 x12  ...9 x5  ...2 x1
+          UAH  ...0 x14  ...9 x2  ...5 x1  ...8 x1
+      The same sheet shows Steam does NOT re-charm DISCOUNTED prices: on-sale
+      endings are scattered (RUB 449, UAH 182, CNY 44.10). A sale price is
+      just floor(list x (1 - pct)); a tidy ending is luck. Chasing one is our
+      choice, not an industry norm — hence the four charm currencies carry
+      double weight and the other three only break ties.
+
+   Scoring: 3 = ideal, 2 = good, 1 = acceptable, 0 = looks random, times the
+   currency weight. The headline counts clean endings among the four charm
+   currencies only: "2 of 7" was misleading when both clean ones were RUB and
+   UAH, where Steam has no convention at all.
+   ====================================================================== */
+const ENDING_TIERS = {
+  // .90 stays at "good" on Gigi's explicit call although it never appears in
+  // the observed data; .95 drops to "acceptable" for the same reason.
+  dec:   [[3,[99]], [2,[49,90]], [1,[89,79,69,59,39,29,19,9,95,50,0,25,75]]],
+  cnyish:[[3,[0]],  [2,[50]],    [1,[25,75]]],   // whole yuan is the list-price norm
+  whole: [[3,[0,9]],[2,[5]]]                     // RUB UAH: ...0, then ...9, ...5 a distant third
+};
+const ENDING_CLASS = { USD:'dec', EUR:'dec', GBP:'dec', CAD:'dec', CNY:'cnyish', RUB:'whole', UAH:'whole' };
+const QUALITY_CCYS = Object.keys(ENDING_CLASS);
+/* Steam declares a charm ending only for these four, and they are the ones
+   Gigi named. They carry the suggestion; CNY/RUB/UAH break ties. */
+const CHARM_CCYS = ['USD','EUR','GBP','CAD'];
+const CCY_WEIGHT = { USD:2, EUR:2, GBP:2, CAD:2, CNY:1, RUB:1, UAH:1 };
+/* Rates set by pricing strategy, not by charm pricing. The base game rate comes
+   out of revenue planning and the sale calendar — 55% for the Autumn Sale — so
+   charm pricing is a CONSTRAINT it has to live with, not a reason to move it.
+   These SKUs still show their endings; they just never get a suggestion, and the
+   bulk button skips them. Add or remove a SKU id here to change that. */
+const STRATEGY_LOCKED_SKUS = ['base'];
+function isStrategyLocked(skuId){ return STRATEGY_LOCKED_SKUS.indexOf(skuId) !== -1; }
+const MAX_QUALITY = 3 * QUALITY_CCYS.reduce((s,c) => s + CCY_WEIGHT[c], 0);
+function endingLabel(price, ccy){
+  if(CCY_DECIMALS[ccy] === 0) return '\u2026' + (Math.floor(price) % 10);
+  return '.' + String(Math.round((price - Math.floor(price)) * 100)).padStart(2,'0');
+}
+function endingScore(price, ccy){
+  if(price==null || isNaN(price)) return 0;
+  const cls = ENDING_CLASS[ccy];
+  if(!cls) return 0;
+  const key = CCY_DECIMALS[ccy] === 0
+    ? Math.floor(price) % 10
+    : Math.round((price - Math.floor(price)) * 100);
+  for(const [pts, set] of ENDING_TIERS[cls]) if(set.indexOf(key) !== -1) return pts;
+  return 0;
+}
+function priceQuality(skuId, pct){
+  let score = 0, clean = 0, charmSeen = 0;
+  const rows = [];
+  for(const ccy of QUALITY_CCYS){
+    const base = (CATALOG[ccy]||{})[skuId];
+    if(base==null) continue;
+    const price = steamRound(base*(1-pct/100), ccy, 'sku');
+    const pts = endingScore(price, ccy);
+    const charm = CHARM_CCYS.indexOf(ccy) !== -1;
+    score += pts * CCY_WEIGHT[ccy];
+    if(charm){ charmSeen++; if(pts >= 2) clean++; }
+    rows.push({ ccy, price, pts, charm, end: endingLabel(price, ccy) });
+  }
+  return { score, clean, total: charmSeen, rows };
+}
+/* Best percentage within +/-window. Highest score wins; ties go to the
+   smallest move away from what the user actually typed. */
+function bestNearby(skuId, pct, window){
+  window = window || 5;
+  const cur = priceQuality(skuId, pct).score;
+  let best = null;
+  for(let step=1; step<=window; step++){
+    for(const cand of [pct-step, pct+step]){
+      if(cand < 0 || cand > 90) continue;
+      const q = priceQuality(skuId, cand);
+      if(q.score > cur && (!best || q.score > best.score)) best = { pct:cand, score:q.score, clean:q.clean };
+    }
+  }
+  return best;
+}
+function qualityTooltip(skuId, pct){
+  const q = priceQuality(skuId, pct);
+  const word = { 3:'ideal', 2:'good', 1:'ok', 0:'random' };
+  return q.rows.map(r => r.ccy + ' ' + fmt(r.price, r.ccy) + ' (' + r.end + ', ' + word[r.pts] + ')'
+                       + (r.charm ? '' : '  — no Steam charm rule')).join('\n')
+       + '\n\nEnding quality ' + q.score + '/' + MAX_QUALITY
+       + '\nSteam declares a charm ending (.99) only for USD, EUR, GBP and CAD,'
+       + '\nso those four count toward the headline and carry double weight.';
+}
+
+const ALL_EDITABLE_FIELDS = new Set([...RATE_FIELDS, ...BUNDLE_RATE_FIELDS].map(r => r.field));
+
+/* Everything below is injected with innerHTML. pm_rationale is free text typed
+   by a human into a spreadsheet, so it MUST be escaped: without this, a note
+   containing <script> or an onerror= attribute would execute in the dashboard.
+   Applied to every interpolated sheet value, not just the rationale. */
+function esc(v){
+  if(v==null) return '';
+  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function roundPct(v){ return (v==null||isNaN(v)) ? null : Math.round(v*100)/100; }
+
+/* ======================================================================
+   STEAM PRICE ROUNDING  —  derived from the live store, not from a doc
+   ----------------------------------------------------------------------
+   Steam TRUNCATES (floors) the discounted price to the currency's minor
+   unit. It does NOT round half-up.
+
+       final = floor( base * (1 - discount), decimals[currency] )
+
+   Verified 49/49 against live store prices (store.steampowered.com
+   appdetails, 2026-09-02) across 7 currencies x 7 discounted SKUs.
+   Competing rules scored: ROUND half-up 33/49, workbook rule 28/49.
+
+   NOTE — this DIFFERS from tab "5. Discount Simulation" of the Dynamic
+   Pricing Tool, which uses =ROUND(...) and treats CNY as 0 decimals.
+   Two proven divergences from the live store:
+     * ROUND vs FLOOR: USD 29.99 @55% -> Steam 13.49, workbook 13.50
+     * CNY decimals:   CNY 98.00 @55% -> Steam 44.10, workbook 44
+   The workbook is wrong on both counts. Fix it there too.
+
+   Applied PER SKU, then summed for bundles (per GG, 2026-09-02).
+   ====================================================================== */
+const CCY_DECIMALS = { USD:2, EUR:2, GBP:2, CAD:2, CNY:2, RUB:0, UAH:0 };
+function floorTo(v, dp){
+  const f = Math.pow(10, dp);
+  return Math.floor(Number((v * f).toFixed(6))) / f;
+}
+function steamRound(raw, ccy, kind){
+  if(raw==null || isNaN(raw)) return raw;
+  const dp = CCY_DECIMALS[ccy];
+  if(dp==null) return raw;          // unknown currency: leave arithmetic alone
+  return floorTo(raw, dp);
+}
+const STEAM_ROUNDING_IMPLEMENTED = true;
+function fmt(v, ccy){
+  if(v==null||isNaN(v)) return '—';
+  const decimals = WHOLE_NUMBER_CCY.has(ccy) ? 0 : 2;
+  const factor = Math.pow(10, decimals);
+  const rounded = Math.round(v*factor)/factor;
+  return rounded.toLocaleString('en-US', { minimumFractionDigits:decimals, maximumFractionDigits:decimals });
+}
+
+/* ---------------- STATE ---------------- */
+let DATA = { discounts: [] };
+const S = { platform:'steam', discountId:null, currency:'USD', anchors:{} };
+const pendingKeyMap = {};
+/* Anchors are in-memory only (not saved to the sheet, not persisted across a
+   reload) — they're this session's "which SKUs am I holding fixed" scratch
+   state, kept per discount period so switching periods doesn't bleed one
+   period's anchor picks into another. */
+function getAnchors(d){ return S.anchors[d.discount_id] || (S.anchors[d.discount_id] = []); }
+function isAnchor(d, sku){ return getAnchors(d).indexOf(sku) !== -1; }
+function toggleAnchor(d, sku){
+  const arr = getAnchors(d);
+  const i = arr.indexOf(sku);
+  if(i===-1) arr.push(sku); else arr.splice(i,1);
+}
+
+function visibleDiscounts(platform){
+  return DATA.discounts
+    .filter(d => d.platform===platform && d.status!=='archived')
+    .sort((a,b)=> new Date(b.start_date) - new Date(a.start_date))
+    .slice(0,8);
+}
+function getDiscount(){ return DATA.discounts.find(d => d.discount_id===S.discountId) || null; }
+
+function onPlatformChange(){
+  S.platform = document.getElementById('platform-sel').value;
+  if(S.platform !== 'steam'){
+    document.getElementById('discount-group').style.display = 'none';
+    document.getElementById('disc-flow-arrow').style.display = 'none';
+    document.getElementById('currency-group').style.display = 'none';
+    document.getElementById('curr-flow-arrow').style.display = 'none';
+    document.getElementById('empty-state').style.display = 'none';
+    document.getElementById('wip-state').style.display = 'block';
+    document.getElementById('content-area').innerHTML = '';
+    return;
+  }
+  document.getElementById('discount-group').style.display = 'flex';
+  document.getElementById('disc-flow-arrow').style.display = 'flex';
+  document.getElementById('wip-state').style.display = 'none';
+  const list = visibleDiscounts(S.platform);
+  S.discountId = list.length ? list[0].discount_id : null;
+  buildDiscountDropdown();
+  toggleCurrencyVisibility();
+  render();
+}
+function onDiscountChange(){ S.discountId = document.getElementById('discount-sel').value; render(); }
+function onCurrencyChange(){ S.currency = document.getElementById('currency-sel').value; render(); }
+function toggleCurrencyVisibility(){
+  const show = S.platform==='steam';
+  document.getElementById('currency-group').style.display = show ? 'flex' : 'none';
+  document.getElementById('curr-flow-arrow').style.display = show ? 'flex' : 'none';
+}
+function buildDiscountDropdown(){
+  const sel = document.getElementById('discount-sel');
+  const list = visibleDiscounts(S.platform);
+  sel.innerHTML = list.map(d => `<option value="${esc(d.discount_id)}">${esc(d.discount_name)} (${esc(d.start_date)} – ${esc(d.end_date)})</option>`).join('');
+  if(list.length) sel.value = S.discountId;
+}
+
+/* ---------------- LOAD (fetch live from Google Sheet via n8n) ---------------- */
+let autoRetryN = 0, autoRetryTimer = null;
+const AUTO_RETRY_MAX = 5;
+function scheduleAutoRetry(err){
+  if(err && err.message === 'AUTH') return;          // a bad token will not fix itself
+  if(autoRetryN >= AUTO_RETRY_MAX){
+    document.getElementById('load-error-text').textContent =
+      '⚠ Still cannot reach the Discount Feed sheet after ' + AUTO_RETRY_MAX +
+      ' attempts. Check that the n8n workflow is published and that this page\u2019s origin (' +
+      location.origin + ') is allowed by the webhook.';
+    return;
+  }
+  const delay = Math.min(30000, 2000 * Math.pow(2, autoRetryN));  // 2s,4s,8s,16s,30s
+  autoRetryN++;
+  clearTimeout(autoRetryTimer);
+  autoRetryTimer = setTimeout(() => loadFeed(true), delay);
+}
+async function loadFeed(isRetry){
+  document.getElementById('load-error-banner').style.display = 'none';
+  if(!isRetry){
+    document.getElementById('loading-state').style.display = 'block';
+    document.getElementById('empty-state').style.display = 'none';
+    document.getElementById('content-area').innerHTML = '';
+  }
+  try{
+    // cache:'no-store' + a cache-buster. Without these the browser served a
+    // stale feed for minutes: edits made directly in the Google Sheet did not
+    // appear even after a refresh. Every manual probe during testing used
+    // no-store, which is exactly why this went unnoticed.
+    const bust = (CONFIG.readUrl.includes('?') ? '&' : '?') + '_ts=' + Date.now();
+    const res = await fetch(CONFIG.readUrl + bust, { headers: authHeaders(), cache: 'no-store' });
+    if(res.status===401 || res.status===403) throw new Error('AUTH');
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const body = await res.json();
+    const rows = Array.isArray(body) ? body : (body.discounts || []);
+    DATA.discounts = rows;
+    autoRetryN = 0; clearTimeout(autoRetryTimer);
+    lsSet('sos_last_known_feed', JSON.stringify({ fetchedAt: new Date().toISOString(), rows }));
+    applyLocalOverrides();
+    document.getElementById('loading-state').style.display = 'none';
+    initAfterLoad();
+  }catch(err){
+    const cached = lsGet('sos_last_known_feed');
+    document.getElementById('loading-state').style.display = 'none';
+    const parsed = jparse(cached, null);
+    if(parsed && Array.isArray(parsed.rows)){
+      DATA.discounts = parsed.rows;
+      applyLocalOverrides();
+      document.getElementById('load-error-text').textContent = (err && err.message==='AUTH')
+        ? '⚠ Access token missing or rejected — open this dashboard from the Coda page, not a bare bookmark. Showing cached data from ' + new Date(parsed.fetchedAt).toLocaleString()
+        : '⚠ Could not reach the live sheet — showing cached data from ' + new Date(parsed.fetchedAt).toLocaleString();
+      document.getElementById('load-error-banner').style.display = 'flex';
+      initAfterLoad();
+    } else {
+      // No cached copy to fall back on. Previously a dead end: the message
+      // appeared but the banner holding "Retry now" stayed hidden, so the only
+      // way out was a manual reload. Now we show the banner AND retry with backoff.
+      document.getElementById('load-error-text').textContent = (err && err.message==='AUTH')
+        ? '⚠ Access token missing or rejected — open this dashboard from the Coda page, not a bare link.'
+        : '⚠ Could not reach the Discount Feed sheet' + (err && err.message ? ' (' + err.message + ')' : '') + ' — retrying automatically…';
+      document.getElementById('load-error-banner').style.display = 'flex';
+      document.getElementById('empty-state').style.display = 'none';
+      scheduleAutoRetry(err);
+    }
+  }
+}
+function initAfterLoad(){
+  buildDiscountDropdown();
+  toggleCurrencyVisibility();
+  const list = visibleDiscounts(S.platform);
+  if(list.length && !S.discountId) S.discountId = list[0].discount_id;
+  render();
+  updateSyncBanner();
+  retryAllPending();
+}
+document.getElementById('retry-load-btn').addEventListener('click', () => { autoRetryN = 0; clearTimeout(autoRetryTimer); loadFeed(true); });
+
+/* ---------------- SAFE STORAGE (Coda embeds partition or block iframe storage) ---------------- */
+function lsGet(k){ try{ return window.localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ window.localStorage.setItem(k,v); return true; }catch(e){ return false; } }
+function jparse(raw, fallback){ try{ return raw==null ? fallback : JSON.parse(raw); }catch(e){ return fallback; } }
+
+/* ---------------- PERSISTENCE (local cache + pending queue + webhook sync) ---------------- */
+/* Editor attribution: intentionally NOT collected.
+   The Discount Feed sheet has no attribution column, the Code node
+   ("Validate + Build Row") does not require one, and "Sheets - Update Row" is
+   in Map Automatically mode, which silently drops any field without a matching
+   column. So anything sent for attribution was discarded server-side.
+   To add it for real later: create the columns in tab
+   "9. Coda Discount Feed Database", add them to ALLOWED_FIELDS in the Code
+   node, then re-include them in the payload built in doSave(). */
+function sanitizeKey(discountId, field){ return (discountId+'__'+field).replace(/[^a-zA-Z0-9_]/g,'-'); }
+function cacheOverrideLocally(discountId, field, value){
+  const overrides = jparse(lsGet('sos_local_overrides'), {}) || {};
+  overrides[discountId] = overrides[discountId] || {};
+  overrides[discountId][field] = value;
+  lsSet('sos_local_overrides', JSON.stringify(overrides));
+}
+function clearOverrideLocally(discountId, field){
+  const overrides = jparse(lsGet('sos_local_overrides'), null);
+  if(!overrides || !overrides[discountId]) return;
+  delete overrides[discountId][field];
+  if(Object.keys(overrides[discountId]).length===0) delete overrides[discountId];
+  lsSet('sos_local_overrides', JSON.stringify(overrides));
+}
+function applyLocalOverrides(){
+  const overrides = jparse(lsGet('sos_local_overrides'), null);
+  if(!overrides) return;
+  DATA.discounts.forEach(d => {
+    const o = overrides[d.discount_id];
+    if(!o) return;
+    Object.entries(o).forEach(([field, value]) => { d[field] = value; });
+  });
+}
+function getPendingEdits(){ const q = jparse(lsGet('sos_pending_edits'), []); return Array.isArray(q) ? q : []; }
+function queuePendingEdit(record){
+  const q = getPendingEdits();
+  const idx = q.findIndex(r => r.discount_id===record.discount_id && r.field===record.field);
+  if(idx>=0) q[idx]=record; else q.push(record);
+  lsSet('sos_pending_edits', JSON.stringify(q));
+}
+function removePendingEdit(discountId, field){
+  const q = getPendingEdits().filter(r => !(r.discount_id===discountId && r.field===field));
+  lsSet('sos_pending_edits', JSON.stringify(q));
+}
+function updateSyncBanner(){
+  const pending = getPendingEdits();
+  const banner = document.getElementById('sync-banner');
+  if(pending.length===0){ banner.style.display='none'; return; }
+  banner.style.display='flex';
+  banner.querySelector('.sync-count').textContent = pending.length;
+}
+function retryAllPending(){
+  getPendingEdits().forEach(p => {
+    const d = DATA.discounts.find(x => x.discount_id===p.discount_id);
+    if(d) doSave(d, p.field, p.value, true);
+  });
+}
+const saveTimers = {};
+function scheduleSave(d, field, value){
+  cacheOverrideLocally(d.discount_id, field, value);
+  const key = sanitizeKey(d.discount_id, field);
+  pendingKeyMap[key] = { discountId:d.discount_id, field };
+  setSaveStatus(key, 'saving');
+  clearTimeout(saveTimers[key]);
+  saveTimers[key] = setTimeout(() => doSave(d, field, value), CONFIG.debounceMs);
+}
+async function doSave(d, field, value, silent){
+  const key = sanitizeKey(d.discount_id, field);
+  pendingKeyMap[key] = { discountId:d.discount_id, field };
+  if(!silent) setSaveStatus(key, 'saving');
+  // Payload build lives INSIDE the try: a throw here (storage, serialisation,
+  // anything) must surface as a visible error and a queued retry — never as an
+  // unhandled rejection that leaves the row stuck on "Saving…".
+  let payload;
+  try{
+    payload = { discount_id:d.discount_id, field, value, edited_at:new Date().toISOString() };
+    if(!CONFIG.writeUrl || CONFIG.writeUrl.includes('REPLACE')){
+      setSaveStatus(key, 'error'); queuePendingEdit(payload); updateSyncBanner(); return;
+    }
+    const res = await fetch(CONFIG.writeUrl, { method:'POST', headers:authHeaders({'Content-Type':'application/json'}), body:JSON.stringify(payload) });
+    const body = await res.json().catch(() => ({}));
+    if(!res.ok || body.ok === false) throw new Error(body.error || ('HTTP ' + res.status));
+    setSaveStatus(key, 'saved');
+    clearOverrideLocally(d.discount_id, field);
+    removePendingEdit(d.discount_id, field);
+    updateSyncBanner();
+  }catch(err){
+    setSaveStatus(key, 'error');
+    queuePendingEdit(payload || { discount_id:d.discount_id, field, value,
+      edited_at:new Date().toISOString() });
+    updateSyncBanner();
+  }
+}
+const saveStatusState = {};
+function setSaveStatus(key, status){
+  saveStatusState[key] = { status, at:new Date() };
+  paintSaveStatus(key);
+}
+function paintSaveStatus(key){
+  const el = document.getElementById('savestatus-'+key);
+  const st = saveStatusState[key];
+  if(!el || !st) return;
+  el.className = 'save-status '+st.status;
+  if(st.status==='') { el.textContent=''; el.className='save-status'; return; }
+  if(st.status==='dirty') el.textContent = 'Unsaved — click away';
+  else if(st.status==='saving') el.textContent = 'Saving…';
+  else if(st.status==='saved') el.textContent = 'Saved '+st.at.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  else if(st.status==='error') el.innerHTML = 'Save failed · <span class="retry-btn" data-retry="'+key+'">retry</span>';
+}
+function repaintAllSaveStatuses(){ Object.keys(saveStatusState).forEach(paintSaveStatus); }
+document.addEventListener('click', e => {
+  const retryEl = e.target.closest('[data-retry]');
+  if(retryEl){
+    const info = pendingKeyMap[retryEl.dataset.retry];
+    if(info){
+      const d = DATA.discounts.find(x => x.discount_id===info.discountId);
+      const pending = getPendingEdits().find(p => p.discount_id===info.discountId && p.field===info.field);
+      if(d && pending) doSave(d, info.field, pending.value);
+    }
+  }
+  if(e.target.id==='retry-all-btn') retryAllPending();
+});
+
+/* ---------------- RENDER (focus-preserving) ---------------- */
+function render(){
+  const active = document.activeElement;
+  const activeId = active && active.id ? active.id : null;
+  const selStart = active && typeof active.selectionStart==='number' ? active.selectionStart : null;
+  const selEnd = active && typeof active.selectionEnd==='number' ? active.selectionEnd : null;
+  doRender();
+  if(activeId){
+    const el = document.getElementById(activeId);
+    if(el){ el.focus(); if(selStart!=null) el.setSelectionRange(selStart, selEnd); }
+  }
+}
+function doRender(){
+  if(S.platform !== 'steam') return; // WIP state already shown by onPlatformChange
+  const list = visibleDiscounts(S.platform);
+  const empty = document.getElementById('empty-state');
+  const content = document.getElementById('content-area');
+  if(!list.length){ empty.style.display='block'; content.innerHTML=''; return; }
+  empty.style.display='none';
+  const d = getDiscount();
+  if(!d){ content.innerHTML=''; return; }
+
+  const statusClass = d.status==='active' ? 'active' : d.status==='upcoming' ? 'upcoming' : 'ended';
+  let html = `<div class="meta-row">
+    <span class="status-chip ${statusClass}">${esc(d.status)}</span>
+    <span class="meta-item">Discount: <strong>${esc(d.discount_name)}</strong></span>
+    <span class="meta-item">${esc(d.start_date)} – ${esc(d.end_date)}</span>
+    <span class="meta-item">Platform: <strong>${esc(String(d.platform||'').toUpperCase())}</strong></span>
+  </div>`;
+
+  html += renderRationale(d);
+
+  html += renderRatesPanel(d);
+  html += `<div id="price-area">${renderSteam(d)}</div>`;
+  content.innerHTML = html;
+  attachEditableHandlers(d);
+  repaintAllSaveStatuses();
+}
+
+/* PM rationale — READ-ONLY.
+   Source: column `pm_rationale` on tab "9. Coda Discount Feed Database".
+   No n8n change is needed to read it: "Sheets - Get All Rows" returns every
+   column, and "Normalize Numbers" leaves text alone (verified against the live
+   feed — discount_name / platform / status / dates all arrive as strings).
+   TO MAKE IT EDITABLE LATER: add 'pm_rationale' to ALLOWED_FIELDS in the
+   "Validate + Build Row" Code node, then render a <textarea> here wired to
+   scheduleSave(d, 'pm_rationale', value) exactly like the rate inputs. Give it
+   a longer debounce than 900ms so a paragraph is not saved mid-sentence. */
+function renderRationale(d){
+  const raw = d.pm_rationale;
+  const text = (raw==null ? '' : String(raw)).trim();
+  if(!text){
+    return `<div class="rationale">
+      <span class="rationale-head">PM rationale</span>
+      <span class="rationale-empty">No rationale recorded for this discount yet — add one in the pm_rationale column of the Discount Feed sheet.</span>
+    </div>`;
+  }
+  return `<div class="rationale">
+    <span class="rationale-head">PM rationale</span>
+    <div class="rationale-body">${esc(text)}</div>
+  </div>`;
+}
+function rateRowHtml(d, r, withCharm){
+  const key = sanitizeKey(d.discount_id, r.field);
+  const pct = getPct(d, r.field);
+  let charm = '';
+  let anchorBox = '';
+  if(withCharm && r.sku){
+    const q = priceQuality(r.sku, pct);
+    const locked = isStrategyLocked(r.sku);
+    const nb = locked ? null : bestNearby(r.sku, pct);
+    const cls = q.clean <= 1 ? 'charm-bad' : (q.clean >= 3 ? 'charm-good' : 'charm-mid');
+    charm = `<span class="charm ${cls}" title="${esc(qualityTooltip(r.sku, pct))}">${q.clean}/${q.total} clean</span>` +
+      (locked ? `<span class="charm-locked" title="${esc('Set by pricing strategy, not by charm pricing. The chip reports the endings you get at ' + pct + '% \u2014 it will not propose moving off it.')}">strategy-set</span>` : '') +
+      (nb ? `<button class="charm-sug" data-sku="${esc(r.sku)}" data-field="${esc(r.field)}" data-pct="${nb.pct}"
+              title="${esc('Set to ' + nb.pct + '% \u2014 ' + nb.clean + ' of ' + q.total + ' charm currencies get a clean ending (quality ' + nb.score + '/' + MAX_QUALITY + ' vs ' + q.score + ')')}">\u2192 ${nb.pct}%</button>` : '');
+    if(!locked){
+      const ceilVal = getCeiling(d, CEILING_FIELD_MAP[r.sku]);
+      const ceilNote = ceilVal===null ? 'no ceiling data yet in the sheet' : ('deepest ever: ' + ceilVal + '%');
+      anchorBox = `<label class="anchor-toggle" title="${esc('Hold ' + r.label + ' at ' + pct + '% as a fixed anchor (' + ceilNote + '), then use Auto-fill from anchors to compute every other rate.')}">
+        <input type="checkbox" class="anchor-check" data-sku="${esc(r.sku)}"${isAnchor(d, r.sku) ? ' checked' : ''}> anchor
+      </label>`;
+    }
+  }
+  return `<div class="rate-row">
+    <span class="rate-label">${esc(r.label)}</span>
+    <div class="rate-controls">
+      ${anchorBox}
+      ${charm}
+      <input type="number" class="rate-input" data-field="${esc(r.field)}" id="rateinput-${esc(r.field)}"
+             min="0" max="90" step="1" value="${pct}">
+      <span>%</span>
+      <span id="savestatus-${key}" class="save-status"></span>
+    </div>
+  </div>`;
+}
+function renderRatesPanel(d){
+  const rateRows = RATE_FIELDS.map(r => rateRowHtml(d, r, true)).join('');
+  const bundleRows = BUNDLE_RATE_FIELDS.map(r => rateRowHtml(d, r, false)).join('');
+  return `<div class="section-title">Discount Rates (Layer 1 \u2014 per SKU)
+    <button id="charm-all" class="charm-all" title="Snap the DLC and extras rates to the nearest percentage whose prices end more cleanly, weighted toward USD, EUR, GBP and CAD \u2014 the four currencies where Steam declares a charm ending. The base game rate is set by pricing strategy and is left alone.">Propose cleaner price endings</button>
+    <button id="anchor-autofill" class="charm-all" title="Check one or more SKUs above as anchors. This fills every other SKU rate, and the three bundle extras, with the best-scoring charm percentage that does not exceed the deepest historical discount of your checked anchors.">Auto-fill from anchors</button>
+  </div>
+  <div class="anchor-status" id="anchor-status"></div>
+  <div class="rates-panel">${rateRows}</div>
+  <div class="section-title">Bundle Extra Discount (Layer 2)</div>
+  <div class="rates-panel">${bundleRows}</div>`;
+}
+
+function renderSteam(d){
+  const ccy = S.currency;
+  const cat = CATALOG[ccy];
+
+  const baseRaw = cat.base;
+  const basePct = getPct(d, 'base_game_discount_pct');
+  const baseFinal = steamRound(baseRaw * (1 - basePct/100), ccy, 'sku');
+  let html = `<div class="section-title">Base Game (standalone SKU)</div>
+  <div class="base-card">
+    <div class="price-block"><span class="final-price">${fmt(baseFinal,ccy)}</span><span class="price-curr">${ccy}</span></div>
+    <span class="raw-note">Base ${fmt(baseRaw,ccy)} ${ccy} · locked catalog price · discount rate set above (${basePct}%)</span>
+  </div>`;
+
+  html += `<div class="section-title">Pinned Bundles (two-layer discount math)</div><div class="cards-grid">`;
+  Object.entries(EDITIONS).forEach(([edId, ed]) => {
+    const bundleExtraPct = getPct(d, ed.bundleField);
+    let sumDiscounted = 0;
+    const skuRows = ed.skus.map(skuId => {
+      const rawP = CATALOG[ccy][skuId];   // every SKU now has its own live price; no silent fallback
+      const pctField = SKU_FIELD_MAP[skuId];
+      const pct = getPct(d, pctField);
+      const discP = steamRound(rawP * (1 - pct/100), ccy, 'sku');
+      sumDiscounted += discP;
+      return `<div class="sku-row">
+        <span class="sku-name">${esc(SKU_LABELS[skuId])}<span class="sku-pct">−${esc(pct)}%</span></span>
+        <div class="sku-price-stack"><span class="sku-price-raw">${fmt(rawP,ccy)}</span><span class="sku-price-disc">${fmt(discP,ccy)}</span></div>
+      </div>`;
+    }).join('');
+    const finalPrice = steamRound(sumDiscounted * (1 - bundleExtraPct/100), ccy, 'bundle');
+
+    html += `<div class="card">
+      <div class="card-head">
+        <span class="badge ${ed.badge}">${ed.name}</span>
+        <div class="card-name">${ed.name}</div>
+        <div class="card-desc">${ed.desc}</div>
+      </div>
+      <div class="layer-math">
+        <div class="layer-row"><span>Sum of discounted SKUs</span><span class="layer-val">${fmt(sumDiscounted,ccy)} ${ccy}</span></div>
+        <div class="layer-row"><span>↓ bundle discount −${bundleExtraPct}% (adjust above)</span></div>
+        <div class="final-line"><span>Final bundle price</span><span><span class="final-price">${fmt(finalPrice,ccy)}</span><span class="price-curr">${ccy}</span></span></div>
+      </div>
+      <div class="sku-list">${skuRows}</div>
+    </div>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
+/* Repaint ONLY the computed prices. The rate inputs are deliberately left
+   alone: rebuilding them mid-typing used to destroy and recreate the focused
+   element, which is why saving had to be debounced. Leaving them in place is
+   what makes save-on-blur possible at all. */
+function refreshPrices(d){
+  const area = document.getElementById('price-area');
+  if(area) area.innerHTML = renderSteam(d);
+  RATE_FIELDS.forEach(r => {
+    if(!r.sku) return;
+    const row = document.getElementById('rateinput-'+r.field);
+    if(!row) return;
+    const holder = row.parentElement;
+    const chip = holder.querySelector('.charm');
+    const sug = holder.querySelector('.charm-sug');
+    const pct = getPct(d, r.field);
+    const q = priceQuality(r.sku, pct);
+    if(chip){
+      chip.textContent = q.clean + '/' + q.total + ' clean';
+      chip.className = 'charm ' + (q.clean <= 1 ? 'charm-bad' : (q.clean >= 3 ? 'charm-good' : 'charm-mid'));
+      chip.title = qualityTooltip(r.sku, pct);
+    }
+    const nb = isStrategyLocked(r.sku) ? null : bestNearby(r.sku, pct);
+    if(sug){
+      if(nb){ sug.style.display=''; sug.dataset.pct = nb.pct; sug.textContent = '\u2192 ' + nb.pct + '%';
+              sug.title = 'Set to ' + nb.pct + '% \u2014 ' + nb.clean + ' of ' + q.total
+                        + ' charm currencies get a clean ending (quality ' + nb.score + '/' + MAX_QUALITY + ' vs ' + q.score + ')'; }
+      else sug.style.display = 'none';
+    }
+  });
+}
+function readInput(el){
+  const raw = String(el.value).trim();
+  if(raw === '') return null;                    // mid-edit blank: never commit 0%
+  const v = parseFloat(raw);
+  if(isNaN(v)) return null;
+  return Math.min(90, Math.max(0, v));
+}
+/* Edits commit on BLUR, not while typing. Typing updates the prices live so the
+   effect is visible, but nothing is written to the sheet until focus leaves the
+   box — so a half-typed "6" on the way to "60" is never saved. */
+function attachEditableHandlers(d){
+  document.querySelectorAll('.rate-input').forEach(inp => {
+    inp.addEventListener('focus', e => { e.target.dataset.baseline = e.target.value; });
+    inp.addEventListener('input', e => {
+      const v = readInput(e.target);
+      if(v === null) return;
+      d[e.target.dataset.field] = v;
+      refreshPrices(d);
+      const key = sanitizeKey(d.discount_id, e.target.dataset.field);
+      if(String(v) !== String(e.target.dataset.baseline ?? '')) setSaveStatus(key, 'dirty');
+    });
+    inp.addEventListener('keydown', e => {
+      if(e.key === 'Enter'){ e.preventDefault(); e.target.blur(); }
+      if(e.key === 'Escape'){
+        const b = e.target.dataset.baseline;
+        if(b !== undefined){ e.target.value = b; d[e.target.dataset.field] = parseFloat(b)||0; refreshPrices(d); }
+        e.target.blur();
+      }
+    });
+    inp.addEventListener('blur', e => {
+      const field = e.target.dataset.field;
+      const v = readInput(e.target);
+      const baseline = e.target.dataset.baseline;
+      if(v === null){                              // left it blank: restore
+        e.target.value = baseline !== undefined ? baseline : getPct(d, field);
+        d[field] = parseFloat(e.target.value)||0;
+        refreshPrices(d);
+        setSaveStatus(sanitizeKey(d.discount_id, field), '');
+        return;
+      }
+      e.target.value = v;
+      d[field] = v;
+      refreshPrices(d);
+      if(baseline !== undefined && String(v) === String(baseline)){
+        setSaveStatus(sanitizeKey(d.discount_id, field), '');   // nothing changed
+        return;
+      }
+      e.target.dataset.baseline = String(v);
+      doSave(d, field, v);
+    });
+  });
+  const allBtn = document.getElementById('charm-all');
+  if(allBtn) allBtn.addEventListener('click', () => applyCharmOptimal(d));
+  document.querySelectorAll('.anchor-check').forEach(cb => cb.addEventListener('change', e => {
+    toggleAnchor(d, e.target.dataset.sku);
+    setAnchorStatus('');
+  }));
+  const autofillBtn = document.getElementById('anchor-autofill');
+  if(autofillBtn) autofillBtn.addEventListener('click', () => autoFillFromAnchors(d));
+  document.querySelectorAll('.charm-sug').forEach(btn => btn.addEventListener('click', () => {
+    const field = btn.dataset.field, pct = parseFloat(btn.dataset.pct);
+    if(isNaN(pct)) return;
+    const el = document.getElementById('rateinput-'+field);
+    if(el){ el.value = pct; el.dataset.baseline = String(pct); }
+    d[field] = pct;
+    refreshPrices(d);
+    doSave(d, field, pct);
+  }));
+}
+/* Snap every SKU rate to the nearest better-scoring percentage. Only rates that
+   actually change are written. Two exclusions: bundle extras, whose charm target
+   is the bundle total (a different calculation), and STRATEGY_LOCKED_SKUS, whose
+   rate is decided by pricing strategy and is an input here, not an output. */
+function applyCharmOptimal(d){
+  const moved = [];
+  RATE_FIELDS.forEach(r => {
+    if(!r.sku) return;
+    if(isStrategyLocked(r.sku)) return;    // strategy sets this rate, not charm pricing
+    const cur = getPct(d, r.field);
+    const nb = bestNearby(r.sku, cur);
+    if(!nb) return;
+    d[r.field] = nb.pct;
+    const el = document.getElementById('rateinput-'+r.field);
+    if(el){ el.value = nb.pct; el.dataset.baseline = String(nb.pct); }
+    moved.push(r.label + ': ' + cur + '% → ' + nb.pct + '%');
+    doSave(d, r.field, nb.pct);
+  });
+  refreshPrices(d);
+  const btn = document.getElementById('charm-all');
+  if(btn) btn.textContent = moved.length
+    ? 'Adjusted ' + moved.length + ' rate' + (moved.length>1?'s':'')
+    : 'Already the best nearby';
+  setTimeout(() => { if(btn) btn.textContent = 'Propose cleaner price endings'; }, 4000);
+}
+
+/* ---------------- AUTO-FILL FROM ANCHORS ----------------
+   Gigi sets one or more SKUs' rates by hand and checks them as "anchor".
+   Auto-fill then computes a single ceiling — the deepest historical discount
+   of ANY checked anchor (CEILING_FIELD_MAP, filled in by hand from Steam's own
+   sale history since SteamDB can't be scraped) — and, for every OTHER SKU rate
+   and all three bundle extras, picks the percentage from 0 up to that ceiling
+   with the best charm-ending score. Ties go to the deepest percentage (closest
+   to the ceiling), on the read that a bigger sale is preferable when two
+   percentages end equally cleanly. Anchors themselves are never touched, and
+   the strategy-locked base rate is never a candidate either way. */
+function setAnchorStatus(msg, warn){
+  const el = document.getElementById('anchor-status');
+  if(!el) return;
+  el.textContent = msg;
+  el.className = 'anchor-status' + (warn ? ' warn' : '');
+}
+function computeCeilingFromAnchors(d, anchorSkuIds){
+  let ceiling = null; const missing = [];
+  anchorSkuIds.forEach(sku => {
+    const val = getCeiling(d, CEILING_FIELD_MAP[sku]);
+    if(val === null) missing.push(sku);
+    else if(ceiling === null || val > ceiling) ceiling = val;
+  });
+  return { ceiling, missing };
+}
+function bestUnderCeiling(skuId, ceiling){
+  const top = Math.max(0, Math.min(90, Math.floor(ceiling)));
+  let best = null;
+  for(let pct=0; pct<=top; pct++){
+    const q = priceQuality(skuId, pct);
+    if(!best || q.score > best.score || (q.score === best.score && pct > best.pct)){
+      best = { pct, score:q.score, clean:q.clean };
+    }
+  }
+  return best;
+}
+/* Bundle-total analogue of priceQuality(): sums the (already-set) Layer 1
+   SKU prices for the edition, applies the candidate bundle-extra pct on top,
+   and scores the ending of that final bundle price — this is the "different
+   calculation" the Layer 2 open item refers to; it did not exist before this
+   feature. Reads the CURRENT d (i.e. call this after Layer 1 auto-fill has
+   updated d, so the bundle math reflects the rates it will actually ship with). */
+function bundleSumAtCcy(ed, d, ccy){
+  return ed.skus.reduce((sum, skuId) => {
+    const raw = (CATALOG[ccy]||{})[skuId];
+    if(raw==null) return sum;
+    const pct = getPct(d, SKU_FIELD_MAP[skuId]);
+    return sum + steamRound(raw*(1-pct/100), ccy, 'sku');
+  }, 0);
+}
+function bundlePriceQuality(edId, pct, d){
+  const ed = EDITIONS[edId];
+  let score=0, clean=0, charmSeen=0;
+  for(const ccy of QUALITY_CCYS){
+    const sum = bundleSumAtCcy(ed, d, ccy);
+    if(!sum) continue;
+    const price = steamRound(sum*(1-pct/100), ccy, 'bundle');
+    const pts = endingScore(price, ccy);
+    const charm = CHARM_CCYS.indexOf(ccy) !== -1;
+    score += pts*CCY_WEIGHT[ccy];
+    if(charm){ charmSeen++; if(pts>=2) clean++; }
+  }
+  return { score, clean, total:charmSeen };
+}
+function bestBundleUnderCeiling(edId, d, ceiling){
+  const top = Math.max(0, Math.min(90, Math.floor(ceiling)));
+  let best = null;
+  for(let pct=0; pct<=top; pct++){
+    const q = bundlePriceQuality(edId, pct, d);
+    if(!best || q.score > best.score || (q.score === best.score && pct > best.pct)){
+      best = { pct, score:q.score, clean:q.clean };
+    }
+  }
+  return best;
+}
+function autoFillFromAnchors(d){
+  const anchorSkus = getAnchors(d).filter(sku => RATE_FIELDS.some(r => r.sku===sku));
+  if(!anchorSkus.length){
+    setAnchorStatus('Check at least one SKU above as an anchor first.', true);
+    return;
+  }
+  const { ceiling, missing } = computeCeilingFromAnchors(d, anchorSkus);
+  if(missing.length){
+    const names = missing.map(s => SKU_LABELS[s] || s).join(', ');
+    setAnchorStatus('No ceiling data yet for: ' + names + ' — fill in the sheet, then try again.', true);
+    return;
+  }
+  const moved = [];
+  RATE_FIELDS.forEach(r => {
+    if(!r.sku) return;
+    if(isStrategyLocked(r.sku)) return;          // strategy sets this rate, not charm pricing
+    if(anchorSkus.indexOf(r.sku) !== -1) return; // anchors are held fixed
+    const best = bestUnderCeiling(r.sku, ceiling);
+    if(!best) return;
+    const cur = getPct(d, r.field);
+    d[r.field] = best.pct;
+    const el = document.getElementById('rateinput-'+r.field);
+    if(el){ el.value = best.pct; el.dataset.baseline = String(best.pct); }
+    if(best.pct !== cur){ moved.push(r.label + ': ' + cur + '% → ' + best.pct + '%'); doSave(d, r.field, best.pct); }
+  });
+  Object.entries(EDITIONS).forEach(([edId, ed]) => {
+    const best = bestBundleUnderCeiling(edId, d, ceiling);
+    if(!best) return;
+    const cur = getPct(d, ed.bundleField);
+    d[ed.bundleField] = best.pct;
+    const el = document.getElementById('rateinput-'+ed.bundleField);
+    if(el){ el.value = best.pct; el.dataset.baseline = String(best.pct); }
+    if(best.pct !== cur){ moved.push(ed.name + ' bundle extra: ' + cur + '% → ' + best.pct + '%'); doSave(d, ed.bundleField, best.pct); }
+  });
+  refreshPrices(d);
+  const anchorNames = anchorSkus.map(s => SKU_LABELS[s] || s).join(', ');
+  setAnchorStatus('Ceiling ' + ceiling + '% (from ' + anchorNames + ') — ' +
+    (moved.length ? ('updated ' + moved.length + ' rate' + (moved.length>1?'s':'') + '.') : 'everything else was already there.'));
+}
+
+/* ---------------- THEME TOGGLE ---------------- */
+(function(){
+  const t = document.querySelector('[data-theme-toggle]'), r = document.documentElement;
+  let dark = true;
+  t.addEventListener('click', () => {
+    dark = !dark;
+    r.setAttribute('data-theme', dark ? 'dark' : 'light');
+    t.innerHTML = dark
+      ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`
+      : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>`;
+  });
+})();
+
+/* ---------------- INIT ---------------- */
+loadFeed(false);
+</script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SOS Discount Overview Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&display=swap" rel="stylesheet">
+<style>
+:root, [data-theme="light"] {
+  --bg:#f7f6f2; --surface:#f9f8f5; --surface2:#fbfbf9; --offset:#f0ede8; --dynamic:#e6e3dd;
+  --divider:#dcd9d5; --border:#d4d1ca; --text:#28251d; --muted:#6b6a65; --faint:#c0bfba; --inv:#f9f8f4;
+  --pri:#01696f; --pri-hov:#0c4e54; --pri-hl:#d0dedd;
+  --gold:#9a6c00; --gold-hl:#e9e0c6;
+  --purple:#7a39bb; --purple-hl:#dacfde;
+  --succ:#437a22; --succ-hl:#d4dfcc;
+  --warn:#964219; --warn-hl:#e8d5c8;
+  --err:#a12c7b; --err-hl:#e0ced7;
+  --sh-sm:0 1px 2px oklch(0.2 0.01 80/0.06); --sh-md:0 4px 12px oklch(0.2 0.01 80/0.08); --sh-lg:0 12px 32px oklch(0.2 0.01 80/0.12);
+  --r-sm:.375rem; --r-md:.5rem; --r-lg:.75rem; --r-xl:1rem; --r-full:9999px;
+  --tr:180ms cubic-bezier(0.16,1,0.3,1);
+  --xs:clamp(.75rem,.7rem + .25vw,.875rem); --sm:clamp(.875rem,.8rem + .35vw,1rem);
+  --base:clamp(1rem,.95rem + .25vw,1.125rem); --lg:clamp(1.125rem,1rem + .75vw,1.5rem); --xl:clamp(1.5rem,1.2rem + 1.25vw,2.25rem);
+  --sp1:.25rem; --sp2:.5rem; --sp3:.75rem; --sp4:1rem; --sp5:1.25rem; --sp6:1.5rem; --sp8:2rem; --sp10:2.5rem; --sp12:3rem;
+}
+[data-theme="dark"] {
+  --bg:#131211; --surface:#1a1917; --surface2:#201f1d; --offset:#252422; --dynamic:#2e2d2b;
+  --divider:#2e2d2b; --border:#3c3b39; --text:#d4d3d0; --muted:#7a7977; --faint:#4e4d4b; --inv:#1a1917;
+  --pri:#4f98a3; --pri-hov:#227f8b; --pri-hl:#1a3234;
+  --gold:#e8af34; --gold-hl:#2d2618;
+  --purple:#a86fdf; --purple-hl:#261a33;
+  --succ:#6daa45; --succ-hl:#192812;
+  --warn:#d4804a; --warn-hl:#2d1a0e;
+  --err:#d163a7; --err-hl:#2e1225;
+  --sh-sm:0 1px 2px oklch(0 0 0/0.25); --sh-md:0 4px 12px oklch(0 0 0/0.35); --sh-lg:0 12px 32px oklch(0 0 0/0.45);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{height:100%}
+html,body{-webkit-font-smoothing:antialiased}
+body{font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--bg);min-height:100vh}
+button{cursor:pointer;background:none;border:none;font:inherit;color:inherit}
+input,select{font:inherit;color:inherit;background:var(--offset);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp2) var(--sp3);transition:border-color var(--tr),box-shadow var(--tr);outline:none}
+input:focus,select:focus{border-color:var(--pri);box-shadow:0 0 0 3px oklch(from var(--pri) l c h/.15)}
+input:disabled{opacity:.5;cursor:not-allowed;background:var(--dynamic)}
+select{cursor:pointer;appearance:none;padding-right:var(--sp8);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right var(--sp3) center}
+
+.hdr{display:flex;align-items:center;gap:var(--sp4);padding:var(--sp4) var(--sp6);background:var(--surface);border-bottom:1px solid var(--divider);position:sticky;top:0;z-index:20}
+.logo{display:flex;align-items:center;gap:var(--sp3);color:var(--text)}
+.logo-text{font-size:14px;font-weight:700;letter-spacing:-.01em}
+.hdr-sub{font-size:12px;color:var(--muted);font-weight:500}
+.hdr-meta{font-size:11px;color:var(--muted);margin-left:auto;display:flex;align-items:center;gap:var(--sp4)}
+.theme-btn{width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:var(--r-md);color:var(--muted);transition:background var(--tr),color var(--tr)}
+.theme-btn:hover{background:var(--offset);color:var(--text)}
+.main{max-width:1180px;margin:0 auto;padding:var(--sp6) var(--sp6) var(--sp10);display:flex;flex-direction:column;gap:var(--sp5)}
+
+.ctrl-bar{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-xl);padding:var(--sp5);display:flex;flex-direction:column;gap:var(--sp4);box-shadow:var(--sh-sm)}
+.ctrl-bar-top{display:flex;align-items:flex-end;gap:var(--sp6);flex-wrap:wrap}
+.ctrl-title{font-size:15px;font-weight:700;letter-spacing:-.015em;margin-right:var(--sp2)}
+.ctrl-group{display:flex;flex-direction:column;gap:6px;min-width:190px}
+.ctrl-label{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.ctrl-flow{display:flex;align-items:center;color:var(--faint);font-size:16px;padding-bottom:8px}
+
+.banner{display:none;align-items:center;justify-content:space-between;gap:var(--sp4);border-radius:var(--r-lg);padding:var(--sp3) var(--sp5);font-size:12px;font-weight:500}
+.banner.warn{background:var(--warn-hl);border:1px solid oklch(from var(--warn) l c h/.35);color:var(--warn)}
+.banner.err{background:var(--err-hl);border:1px solid oklch(from var(--err) l c h/.35);color:var(--err)}
+.banner button{text-decoration:underline;font-weight:700;color:inherit}
+
+.empty-state{background:var(--offset);border:1px dashed var(--border);border-radius:var(--r-lg);padding:var(--sp10) var(--sp5);text-align:center;color:var(--muted);font-size:13px;font-weight:500}
+.wip-state{background:var(--gold-hl);border:1px dashed var(--gold);border-radius:var(--r-lg);padding:var(--sp10) var(--sp5);text-align:center;color:var(--gold);font-size:13px;font-weight:600}
+
+.meta-row{display:flex;align-items:center;gap:var(--sp4);flex-wrap:wrap;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--sp3) var(--sp5)}
+.meta-item{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.meta-item strong{color:var(--text);font-weight:600}
+.status-chip{display:inline-flex;align-items:center;padding:2px 9px;border-radius:var(--r-full);font-size:10px;font-weight:700;letter-spacing:.03em;text-transform:uppercase}
+.status-chip.active{background:var(--succ-hl);color:var(--succ)}
+.status-chip.upcoming{background:var(--pri-hl);color:var(--pri)}
+.status-chip.ended,.status-chip.archived{background:var(--dynamic);color:var(--muted)}
+.section-title{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:var(--sp2)}
+
+.rates-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-xl);box-shadow:var(--sh-sm);padding:var(--sp5);display:flex;flex-direction:column;gap:var(--sp3)}
+.rate-row{display:flex;align-items:center;justify-content:space-between;gap:var(--sp4);padding:var(--sp2) 0;border-bottom:1px solid var(--divider)}
+.rate-row:last-child{border-bottom:none}
+.rate-label{font-size:12px;font-weight:600;flex:1}
+.rate-controls{display:flex;align-items:center;gap:8px}
+.rate-controls input{width:64px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums}
+
+.base-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-xl);box-shadow:var(--sh-sm);padding:var(--sp5);display:flex;align-items:center;gap:var(--sp6);flex-wrap:wrap}
+.base-card .price-block{display:flex;align-items:baseline;gap:var(--sp2)}
+.base-card .final-price{font-size:var(--xl);font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.base-card .price-curr{font-size:12px;color:var(--muted);font-weight:500}
+.raw-note{font-size:11px;color:var(--muted)}
+
+.cards-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sp5)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-xl);box-shadow:var(--sh-sm);overflow:hidden;display:flex;flex-direction:column}
+.card-head{padding:var(--sp4) var(--sp5) var(--sp3);border-bottom:1px solid var(--divider)}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:var(--r-full);font-size:10px;font-weight:700;letter-spacing:.03em;margin-bottom:var(--sp2)}
+.badge.campaigns{background:var(--pri-hl);color:var(--pri)}
+.badge.complete{background:var(--gold-hl);color:var(--gold)}
+.badge.supporter{background:var(--purple-hl);color:var(--purple)}
+.card-name{font-size:13px;font-weight:700;letter-spacing:-.01em}
+.card-desc{font-size:11px;color:var(--muted);margin-top:2px}
+.layer-math{padding:var(--sp3) var(--sp5);display:flex;flex-direction:column;gap:6px;background:var(--surface2);border-bottom:1px solid var(--divider)}
+.layer-row{display:flex;align-items:baseline;justify-content:space-between;font-size:11px;color:var(--muted)}
+.layer-row .layer-val{font-variant-numeric:tabular-nums;color:var(--text);font-weight:600}
+.final-line{display:flex;align-items:baseline;justify-content:space-between;padding-top:6px;border-top:1px solid var(--divider);margin-top:2px}
+.final-line .final-price{font-size:var(--lg);font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.final-line .price-curr{font-size:11px;color:var(--muted);margin-left:4px}
+.sku-list{padding:var(--sp3) var(--sp5) var(--sp4);display:flex;flex-direction:column;gap:6px;flex:1}
+.sku-row{display:flex;align-items:center;gap:var(--sp3);padding:var(--sp2) var(--sp3);border-radius:var(--r-md);background:var(--surface2);border:1px solid oklch(from var(--text) l c h/.06)}
+.sku-name{font-size:11px;font-weight:500;flex:1}
+.sku-pct{font-size:10px;color:var(--muted);margin-left:6px}
+.sku-price-stack{display:flex;align-items:baseline;gap:6px;font-size:11px;font-variant-numeric:tabular-nums}
+.sku-price-raw{color:var(--faint);text-decoration:line-through}
+.sku-price-disc{color:var(--text);font-weight:600}
+
+.rationale{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--pri);border-radius:var(--r-lg);padding:var(--sp4) var(--sp5);display:flex;flex-direction:column;gap:6px;box-shadow:var(--sh-sm)}
+.rationale-head{font-size:10px;font-weight:700;color:var(--pri);text-transform:uppercase;letter-spacing:.06em}
+.rationale-body{font-size:12px;line-height:1.55;color:var(--text);white-space:pre-wrap;word-break:break-word}
+.rationale-empty{font-size:12px;color:var(--muted);font-style:italic}
+.rationale-anchor{border:2px dashed var(--border);border-radius:var(--r-lg);padding:var(--sp5);text-align:center;color:var(--faint);font-size:12px;font-weight:600;letter-spacing:.02em;background:var(--offset)}
+.notes{font-size:11px;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--sp3) var(--sp5);display:flex;gap:var(--sp5);flex-wrap:wrap}
+.note-i{display:flex;align-items:center;gap:6px}
+.ndot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+
+.charm{font-size:9px;font-weight:700;padding:2px 6px;border-radius:var(--r-full);letter-spacing:.02em;white-space:nowrap;cursor:help}
+.charm-good{background:var(--succ-hl);color:var(--succ)}
+.charm-mid{background:var(--gold-hl);color:var(--gold)}
+.charm-bad{background:var(--dynamic);color:var(--muted)}
+.charm-locked{font-size:9px;font-weight:700;letter-spacing:.02em;color:var(--muted);border:1px dashed var(--border);border-radius:var(--r-full);padding:1px 6px;white-space:nowrap;cursor:help}
+.charm-sug{font-size:9px;font-weight:700;color:var(--pri);border:1px solid var(--pri);border-radius:var(--r-full);padding:1px 6px;white-space:nowrap}
+.charm-sug:hover{background:var(--pri);color:var(--inv)}
 .charm-all{float:right;font-size:9px;font-weight:700;color:var(--pri);border:1px solid var(--border);border-radius:var(--r-full);padding:2px 9px;text-transform:none;letter-spacing:0}
 .charm-all:hover{border-color:var(--pri);background:var(--pri-hl)}
 .save-status.dirty{color:var(--warn)}
