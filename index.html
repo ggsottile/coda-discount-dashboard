@@ -437,6 +437,10 @@ const CCY_WEIGHT = { USD:2, EUR:2, GBP:2, CAD:2, CNY:1, RUB:1, UAH:1 };
 const STRATEGY_LOCKED_SKUS = ['base'];
 function isStrategyLocked(skuId){ return STRATEGY_LOCKED_SKUS.indexOf(skuId) !== -1; }
 const MAX_QUALITY = 3 * QUALITY_CCYS.reduce((s,c) => s + CCY_WEIGHT[c], 0);
+/* Hard floor for every bundle extra (Layer 2). A bundle extra is never
+   auto-filled below this, full stop — even if that means overriding a
+   tighter anchor/own ceiling. Business rule, not a charm-pricing choice. */
+const BUNDLE_MIN_PCT = 10;
 function endingLabel(price, ccy){
   if(CCY_DECIMALS[ccy] === 0) return '\u2026' + (Math.floor(price) % 10);
   return '.' + String(Math.round((price - Math.floor(price)) * 100)).padStart(2,'0');
@@ -943,7 +947,7 @@ function rateRowHtml(d, r, withCharm){
     if(!locked){
       const ceilVal = getCeiling(d, CEILING_FIELD_MAP[r.sku]);
       const ceilNote = ceilVal===null ? 'no ceiling data yet in the sheet' : ('deepest ever: ' + ceilVal + '%');
-      anchorBox = `<label class="anchor-toggle" title="${esc('Hold ' + r.label + ' at ' + pct + '% as a fixed anchor (' + ceilNote + '), then use Auto-fill from anchors to compute every other rate.')}">
+      anchorBox = `<label class="anchor-toggle" title="${esc('Hold ' + r.label + ' at ' + pct + '% as a fixed anchor (' + ceilNote + '), then use Optimize from anchors to compute every other rate.')}">
         <input type="checkbox" class="anchor-check" data-sku="${esc(r.sku)}"${isAnchor(d, r.sku) ? ' checked' : ''}> anchor
       </label>`;
     }
@@ -967,14 +971,13 @@ function renderRatesPanel(d){
   <div class="optim-explainer">
     <div class="optim-explainer-head">How the optimization buttons work</div>
     <ul class="optim-explainer-list">
-      <li><strong>Propose cleaner price endings</strong> nudges each DLC/extra rate a few points up or down to the nearest percentage that makes prices end more cleanly (closer to .99), weighted toward USD, EUR, GBP and CAD \u2014 the four currencies where Steam declares a charm ending. It never proposes 0%, and it leaves the base game alone since that rate is set by pricing strategy, not by charm pricing.</li>
-      <li><strong>Auto-fill from anchors</strong> takes the SKU(s) you've checked as \u201canchor\u201d, finds the deepest discount any of them has ever actually run, and fills every other SKU rate plus all three bundle extras with the cleanest-ending percentage up to that ceiling \u2014 tightened further to each item's own historical ceiling when the sheet has one, so nothing is ever proposed deeper than that item has actually gone before. Anchors are never touched, and nothing is ever auto-filled to 0%.</li>
+      <li><strong>Optimize from anchors</strong> takes the SKU(s) you've checked as \u201canchor\u201d, finds the deepest discount any of them has ever actually run, and for every other SKU rate plus all three bundle extras searches the full range up to that ceiling for the highest price (shallowest discount) that still fulfills as many charm currencies as possible \u2014 tightened further to each item's own historical ceiling when the sheet has one, so nothing is ever proposed deeper than that item has actually gone before. Anchors are never touched, and nothing is ever filled to 0%.</li>
+      <li>Bundle extras (Layer 2) never go below <strong>${BUNDLE_MIN_PCT}%</strong> \u2014 a hard floor that holds even if a tighter ceiling would otherwise pull them lower.</li>
       <li>The Complete Edition's bundle extra is always chosen so its final price lands closer to the Supporter Edition's price than to the Campaigns Edition's \u2014 Complete sits between them, and its pricing should reflect that.</li>
     </ul>
     ${renderCharmOverview(d)}
     <div class="optim-btn-row">
-      <button id="charm-all" class="charm-all-btn" title="Snap the DLC and extras rates to the nearest percentage whose prices end more cleanly, weighted toward USD, EUR, GBP and CAD \u2014 the four currencies where Steam declares a charm ending. The base game rate is set by pricing strategy and is left alone. Never proposes 0%.">Propose cleaner price endings</button>
-      <button id="anchor-autofill" class="charm-all-btn" title="Check one or more SKUs above as anchors. This fills every other SKU rate, and the three bundle extras, with the best-scoring charm percentage that does not exceed the deepest historical discount of your checked anchors, or that item's own ceiling if it is lower. Never fills in 0%.">Auto-fill from anchors</button>
+      <button id="anchor-optimize" class="charm-all-btn" title="Check one or more SKUs above as anchors. This fills every other SKU rate, and the three bundle extras, with the highest price (shallowest discount) that still gets the best charm-ending score without exceeding the deepest historical discount of your checked anchors, or that item's own ceiling if it is lower. Bundle extras never go below ${BUNDLE_MIN_PCT}%. Never fills in 0%.">Optimize from anchors</button>
     </div>
   </div>
   <div class="anchor-status" id="anchor-status"></div>
@@ -1118,14 +1121,12 @@ function attachEditableHandlers(d){
       doSave(d, field, v);
     });
   });
-  const allBtn = document.getElementById('charm-all');
-  if(allBtn) allBtn.addEventListener('click', () => applyCharmOptimal(d));
   document.querySelectorAll('.anchor-check').forEach(cb => cb.addEventListener('change', e => {
     toggleAnchor(d, e.target.dataset.sku);
     setAnchorStatus('');
   }));
-  const autofillBtn = document.getElementById('anchor-autofill');
-  if(autofillBtn) autofillBtn.addEventListener('click', () => autoFillFromAnchors(d));
+  const optimizeBtn = document.getElementById('anchor-optimize');
+  if(optimizeBtn) optimizeBtn.addEventListener('click', () => optimizeFromAnchors(d));
   document.querySelectorAll('.charm-sug').forEach(btn => btn.addEventListener('click', () => {
     const field = btn.dataset.field, pct = parseFloat(btn.dataset.pct);
     if(isNaN(pct)) return;
@@ -1136,42 +1137,22 @@ function attachEditableHandlers(d){
     doSave(d, field, pct);
   }));
 }
-/* Snap every SKU rate to the nearest better-scoring percentage. Only rates that
-   actually change are written. Two exclusions: bundle extras, whose charm target
-   is the bundle total (a different calculation), and STRATEGY_LOCKED_SKUS, whose
-   rate is decided by pricing strategy and is an input here, not an output. */
-function applyCharmOptimal(d){
-  const moved = [];
-  RATE_FIELDS.forEach(r => {
-    if(!r.sku) return;
-    if(isStrategyLocked(r.sku)) return;    // strategy sets this rate, not charm pricing
-    const cur = getPct(d, r.field);
-    const nb = bestNearby(r.sku, cur);
-    if(!nb) return;
-    d[r.field] = nb.pct;
-    const el = document.getElementById('rateinput-'+r.field);
-    if(el){ el.value = nb.pct; el.dataset.baseline = String(nb.pct); }
-    moved.push(r.label + ': ' + cur + '% → ' + nb.pct + '%');
-    doSave(d, r.field, nb.pct);
-  });
-  refreshPrices(d);
-  const btn = document.getElementById('charm-all');
-  if(btn) btn.textContent = moved.length
-    ? 'Adjusted ' + moved.length + ' rate' + (moved.length>1?'s':'')
-    : 'Already the best nearby';
-  setTimeout(() => { if(btn) btn.textContent = 'Propose cleaner price endings'; }, 4000);
-}
-
-/* ---------------- AUTO-FILL FROM ANCHORS ----------------
-   Gigi sets one or more SKUs' rates by hand and checks them as "anchor".
-   Auto-fill then computes a single ceiling — the deepest historical discount
-   of ANY checked anchor (CEILING_FIELD_MAP, filled in by hand from Steam's own
-   sale history since SteamDB can't be scraped) — and, for every OTHER SKU rate
-   and all three bundle extras, picks the percentage from 0 up to that ceiling
-   with the best charm-ending score. Ties go to the deepest percentage (closest
-   to the ceiling), on the read that a bigger sale is preferable when two
-   percentages end equally cleanly. Anchors themselves are never touched, and
-   the strategy-locked base rate is never a candidate either way. */
+/* ---------------- OPTIMIZE FROM ANCHORS ----------------
+   One button, merging what used to be two ("Propose cleaner price endings"
+   and "Auto-fill from anchors"). Gigi sets one or more SKUs' rates by hand
+   and checks them as "anchor". Optimize then computes a single ceiling — the
+   deepest historical discount of ANY checked anchor (CEILING_FIELD_MAP,
+   filled in by hand from Steam's own sale history since SteamDB can't be
+   scraped) — and, for every OTHER SKU rate and all three bundle extras,
+   searches the FULL range up to that ceiling for the percentage with the
+   best charm-ending score: the highest price (shallowest discount) that
+   still clears as many charm currencies as possible. Ties go to the
+   shallower percentage (higher price), not the deeper one — the point is
+   the best price that still charms, not the biggest sale.
+   Bundle extras (Layer 2) additionally never go below BUNDLE_MIN_PCT (10%),
+   a hard floor that overrides a tighter ceiling if the two conflict.
+   Anchors themselves are never touched, and the strategy-locked base rate is
+   never a candidate either way. */
 function setAnchorStatus(msg, warn){
   const el = document.getElementById('anchor-status');
   if(!el) return;
@@ -1202,9 +1183,12 @@ function bestUnderCeiling(skuId, ceiling){
   // holds rather than leaving this SKU un-filled.
   const top = Math.max(1, Math.min(90, Math.floor(ceiling)));
   let best = null;
+  // Shallowest (highest-price) percentage wins ties: Gigi wants the highest
+  // price that still fulfills as many charm currencies as possible, so a
+  // tie no longer favors the deeper discount.
   for(let pct=1; pct<=top; pct++){
     const q = priceQuality(skuId, pct);
-    if(!best || q.score > best.score || (q.score === best.score && pct > best.pct)){
+    if(!best || q.score > best.score || (q.score === best.score && pct < best.pct)){
       best = { pct, score:q.score, clean:q.clean };
     }
   }
@@ -1254,11 +1238,13 @@ function finalBundlePriceAt(edId, pct, d, ccy){
    the candidates that come closest to satisfying it, then rank those by charm
    score — so the constraint is honored as strictly as the ceiling allows. */
 function bestBundleUnderCeiling(edId, d, ceiling, closeness){
-  // Same nonzero rule as bestUnderCeiling: bundle extras are never anchors,
-  // so they must never be auto-filled to 0% either.
-  const top = Math.max(1, Math.min(90, Math.floor(ceiling)));
+  // Bundle extras carry a hard floor (BUNDLE_MIN_PCT): the search never goes
+  // below it, even if that means exceeding a tighter anchor/own ceiling —
+  // 10% minimum is a business rule, so it wins over the ceiling here. When
+  // the ceiling is at or above the floor, the floor changes nothing.
+  const top = Math.max(BUNDLE_MIN_PCT, Math.min(90, Math.floor(ceiling)));
   let candidates = [];
-  for(let pct=1; pct<=top; pct++){
+  for(let pct=BUNDLE_MIN_PCT; pct<=top; pct++){
     const q = bundlePriceQuality(edId, pct, d);
     candidates.push({ pct, score:q.score, clean:q.clean });
   }
@@ -1281,13 +1267,16 @@ function bestBundleUnderCeiling(edId, d, ceiling, closeness){
       pool = sorted.filter(c => c.gap === bestGap);
     }
   }
+  // Same shallowest-wins-ties rule as bestUnderCeiling. pool isn't always in
+  // ascending pct order (the closeness fallback branch re-sorts it by gap),
+  // so the tie-break is explicit here rather than relying on scan order.
   let best = null;
   pool.forEach(c => {
-    if(!best || c.score > best.score || (c.score === best.score && c.pct > best.pct)) best = c;
+    if(!best || c.score > best.score || (c.score === best.score && c.pct < best.pct)) best = c;
   });
   return best;
 }
-function autoFillFromAnchors(d){
+function optimizeFromAnchors(d){
   const anchorSkus = getAnchors(d).filter(sku => RATE_FIELDS.some(r => r.sku===sku));
   if(!anchorSkus.length){
     setAnchorStatus('Check at least one SKU above as an anchor first.', true);
