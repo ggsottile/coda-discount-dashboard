@@ -335,9 +335,16 @@ function getPct(d, field){
    and refuses automated access, so this is not auto-fetched). Blank means
    "no data yet", not "0% ceiling" — getCeiling returns null for that, and
    callers must treat null as "can't compute a ceiling", never as 0.
-   Three bundle_extra_ceiling_pct_<edition> columns also exist in the sheet,
-   reserved for a future per-bundle ceiling; v1 of Auto-fill applies the one
-   ceiling derived from the checked SKU anchors to the bundle extras too. */
+   Three bundle_extra_ceiling_pct_<edition> columns exist for the same reason,
+   one per bundle.
+   Auto-fill derives ONE ceiling from the checked anchors (the deepest of
+   their own ceilings), then — for every other SKU and every bundle extra —
+   tightens that anchor ceiling to the item's OWN ceiling when the sheet has
+   one, via effectiveCeilingFor() below. This is what stops, say, a shallow
+   anchor pick from proposing 50% on a DLC that has itself never gone past
+   35%: each item is still bounded by its own real history, not just the
+   anchor's. An item with no ceiling data of its own falls back to the plain
+   anchor ceiling, same as before. */
 const CEILING_FIELD_MAP = {
   le:'le_ceiling_pct', cc:'cc_ceiling_pct', ck:'ck_ceiling_pct', ost:'ost_ceiling_pct', artbook:'artbook_ceiling_pct',
   luminant:'luminant_ceiling_pct', starborn:'starborn_ceiling_pct', firstborn:'firstborn_ceiling_pct'
@@ -599,6 +606,21 @@ function visibleDiscounts(platform){
     .slice(0,8);
 }
 function getDiscount(){ return DATA.discounts.find(d => d.discount_id===S.discountId) || null; }
+/* Which discount to land on when the page (or a platform switch) has no
+   selection yet. visibleDiscounts() sorts newest-start-date first, so
+   list[0] was the furthest-out upcoming sale — landing on "Steam Custom
+   Sale (Jan 2027)" instead of whatever is actually running today. Prefer
+   the currently active discount; if none is active, the soonest upcoming
+   one; otherwise fall back to the newest entry in the list. */
+function defaultDiscountId(list){
+  if(!list.length) return null;
+  const active = list.filter(d => d.status === 'active');
+  if(active.length) return active[0].discount_id;
+  const upcoming = list.filter(d => d.status === 'upcoming')
+    .slice().sort((a,b) => new Date(a.start_date) - new Date(b.start_date));
+  if(upcoming.length) return upcoming[0].discount_id;
+  return list[0].discount_id;
+}
 
 function onPlatformChange(){
   S.platform = document.getElementById('platform-sel').value;
@@ -616,7 +638,7 @@ function onPlatformChange(){
   document.getElementById('disc-flow-arrow').style.display = 'flex';
   document.getElementById('wip-state').style.display = 'none';
   const list = visibleDiscounts(S.platform);
-  S.discountId = list.length ? list[0].discount_id : null;
+  S.discountId = defaultDiscountId(list);
   buildDiscountDropdown();
   toggleCurrencyVisibility();
   render();
@@ -702,10 +724,13 @@ async function loadFeed(isRetry){
   }
 }
 function initAfterLoad(){
+  // Resolve the default discount BEFORE building the dropdown, so the select
+  // element's initial value is set in the same pass instead of the browser
+  // falling back to whichever option happens to be first in the markup.
+  const list = visibleDiscounts(S.platform);
+  if(list.length && !S.discountId) S.discountId = defaultDiscountId(list);
   buildDiscountDropdown();
   toggleCurrencyVisibility();
-  const list = visibleDiscounts(S.platform);
-  if(list.length && !S.discountId) S.discountId = list[0].discount_id;
   render();
   updateSyncBanner();
   retryAllPending();
@@ -943,13 +968,13 @@ function renderRatesPanel(d){
     <div class="optim-explainer-head">How the optimization buttons work</div>
     <ul class="optim-explainer-list">
       <li><strong>Propose cleaner price endings</strong> nudges each DLC/extra rate a few points up or down to the nearest percentage that makes prices end more cleanly (closer to .99), weighted toward USD, EUR, GBP and CAD \u2014 the four currencies where Steam declares a charm ending. It never proposes 0%, and it leaves the base game alone since that rate is set by pricing strategy, not by charm pricing.</li>
-      <li><strong>Auto-fill from anchors</strong> takes the SKU(s) you've checked as \u201canchor\u201d, finds the deepest discount any of them has ever actually run, and fills every other SKU rate plus all three bundle extras with the cleanest-ending percentage up to that ceiling. Anchors are never touched, and nothing is ever auto-filled to 0%.</li>
+      <li><strong>Auto-fill from anchors</strong> takes the SKU(s) you've checked as \u201canchor\u201d, finds the deepest discount any of them has ever actually run, and fills every other SKU rate plus all three bundle extras with the cleanest-ending percentage up to that ceiling \u2014 tightened further to each item's own historical ceiling when the sheet has one, so nothing is ever proposed deeper than that item has actually gone before. Anchors are never touched, and nothing is ever auto-filled to 0%.</li>
       <li>The Complete Edition's bundle extra is always chosen so its final price lands closer to the Supporter Edition's price than to the Campaigns Edition's \u2014 Complete sits between them, and its pricing should reflect that.</li>
     </ul>
     ${renderCharmOverview(d)}
     <div class="optim-btn-row">
       <button id="charm-all" class="charm-all-btn" title="Snap the DLC and extras rates to the nearest percentage whose prices end more cleanly, weighted toward USD, EUR, GBP and CAD \u2014 the four currencies where Steam declares a charm ending. The base game rate is set by pricing strategy and is left alone. Never proposes 0%.">Propose cleaner price endings</button>
-      <button id="anchor-autofill" class="charm-all-btn" title="Check one or more SKUs above as anchors. This fills every other SKU rate, and the three bundle extras, with the best-scoring charm percentage that does not exceed the deepest historical discount of your checked anchors. Never fills in 0%.">Auto-fill from anchors</button>
+      <button id="anchor-autofill" class="charm-all-btn" title="Check one or more SKUs above as anchors. This fills every other SKU rate, and the three bundle extras, with the best-scoring charm percentage that does not exceed the deepest historical discount of your checked anchors, or that item's own ceiling if it is lower. Never fills in 0%.">Auto-fill from anchors</button>
     </div>
   </div>
   <div class="anchor-status" id="anchor-status"></div>
@@ -1162,6 +1187,14 @@ function computeCeilingFromAnchors(d, anchorSkuIds){
   });
   return { ceiling, missing };
 }
+/* Tightens the anchor-derived ceiling to an individual item's OWN ceiling
+   (a SKU's <sku>_ceiling_pct, or a bundle's bundle_extra_ceiling_pct_<ed>),
+   when the sheet has one. Never loosens it — the anchor ceiling is always
+   an upper bound too, since it's the ceiling Gigi actually verified. Falls
+   back to the plain anchor ceiling when the item has no ceiling of its own. */
+function effectiveCeilingFor(anchorCeiling, ownCeiling){
+  return ownCeiling === null ? anchorCeiling : Math.min(anchorCeiling, ownCeiling);
+}
 function bestUnderCeiling(skuId, ceiling){
   // Never propose 0% — anything not held as an anchor must carry a nonzero
   // discount. If the ceiling itself rounds down to 0 (an anchor that has
@@ -1267,11 +1300,15 @@ function autoFillFromAnchors(d){
     return;
   }
   const moved = [];
+  let tightenedCount = 0;
   RATE_FIELDS.forEach(r => {
     if(!r.sku) return;
     if(isStrategyLocked(r.sku)) return;          // strategy sets this rate, not charm pricing
     if(anchorSkus.indexOf(r.sku) !== -1) return; // anchors are held fixed
-    const best = bestUnderCeiling(r.sku, ceiling);
+    const ownCeiling = getCeiling(d, CEILING_FIELD_MAP[r.sku]);
+    const skuCeiling = effectiveCeilingFor(ceiling, ownCeiling);
+    if(ownCeiling !== null && ownCeiling < ceiling) tightenedCount++;
+    const best = bestUnderCeiling(r.sku, skuCeiling);
     if(!best) return;
     const cur = getPct(d, r.field);
     d[r.field] = best.pct;
@@ -1289,7 +1326,10 @@ function autoFillFromAnchors(d){
     const closeness = edId === 'complete'
       ? { ccy:'USD', nearPrice: finalUSD.supporter, farPrice: finalUSD.campaigns }
       : null;
-    const best = bestBundleUnderCeiling(edId, d, ceiling, closeness);
+    const ownBundleCeiling = getCeiling(d, 'bundle_extra_ceiling_pct_' + edId);
+    const bundleCeiling = effectiveCeilingFor(ceiling, ownBundleCeiling);
+    if(ownBundleCeiling !== null && ownBundleCeiling < ceiling) tightenedCount++;
+    const best = bestBundleUnderCeiling(edId, d, bundleCeiling, closeness);
     if(!best) return;
     const cur = getPct(d, ed.bundleField);
     d[ed.bundleField] = best.pct;
@@ -1301,7 +1341,8 @@ function autoFillFromAnchors(d){
   refreshPrices(d);
   const anchorNames = anchorSkus.map(s => SKU_LABELS[s] || s).join(', ');
   setAnchorStatus('Ceiling ' + ceiling + '% (from ' + anchorNames + ') — ' +
-    (moved.length ? ('updated ' + moved.length + ' rate' + (moved.length>1?'s':'') + '.') : 'everything else was already there.'));
+    (moved.length ? ('updated ' + moved.length + ' rate' + (moved.length>1?'s':'') + '.') : 'everything else was already there.') +
+    (tightenedCount ? (' ' + tightenedCount + ' item' + (tightenedCount>1?'s were':' was') + ' capped tighter by its own ceiling.') : ''));
 }
 
 /* ---------------- THEME TOGGLE ---------------- */
