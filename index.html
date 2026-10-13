@@ -229,7 +229,7 @@ select{cursor:pointer;appearance:none;padding-right:var(--sp8);background-image:
 
   <div class="notes">
     <div class="note-i"><span class="ndot" style="background:var(--pri)"></span>SKU base prices are locked and <strong>baked into this build</strong> — changing them means re-deploying this file, not editing the sheet</div>
-    <div class="note-i"><span class="ndot" style="background:var(--succ)"></span>Prices match the Steam store: base prices pulled live 2026-09-02, discount rounding floors to the currency's minor unit (verified 49/49 against the store)</div>
+    <div class="note-i"><span class="ndot" style="background:var(--succ)"></span>Prices match the Steam store: base prices pulled live 2026-09-02, SKU discounts floor to the currency's minor unit (verified 49/49 against the store); bundle extras apply to each item and round to nearest (verified 21/21, 2026-10-13)</div>
     <div class="note-i"><span class="ndot" style="background:var(--purple)"></span>PM rationale is read-only here — edit it in the <strong>pm_rationale</strong> column of the Discount Feed sheet</div>
     <div class="note-i"><span class="ndot" style="background:var(--gold)"></span>Discount rates are live — edits sync to the Discount Feed Google Sheet; the whole dashboard reloads from that sheet on every page refresh</div>
     <div class="note-i"><span class="ndot" style="background:var(--purple)"></span>Charm pricing is a constraint, not a target: the base game rate is <strong>strategy-set</strong>, so the chip reports its endings but never proposes moving it. Steam forces one discount % across all currencies, so a .99 in <em>every</em> currency is usually impossible. Steam declares a charm ending (.99) only for <strong>USD, EUR, GBP and CAD</strong> — none for CNY, RUB or UAH — so the chips count clean endings among those four. Hover for all seven</div>
@@ -442,13 +442,16 @@ const MAX_QUALITY = 3 * QUALITY_CCYS.reduce((s,c) => s + CCY_WEIGHT[c], 0);
    tighter anchor/own ceiling. Business rule, not a charm-pricing choice. */
 const BUNDLE_MIN_PCT = 10;
 function endingLabel(price, ccy){
-  if(CCY_DECIMALS[ccy] === 0) return '\u2026' + (Math.floor(price) % 10);
-  return '.' + String(Math.round((price - Math.floor(price)) * 100)).padStart(2,'0');
+  const cents = String(Math.round((price - Math.floor(price)) * 100)).padStart(2,'0');
+  if(CCY_DECIMALS[ccy] === 0) return '\u2026' + (Math.floor(price) % 10) + (cents === '00' ? '' : '.' + cents);
+  return '.' + cents;
 }
 function endingScore(price, ccy){
   if(price==null || isNaN(price)) return 0;
   const cls = ENDING_CLASS[ccy];
   if(!cls) return 0;
+  // A RUB bundle price with kopecks (e.g. 2423.50) is never a clean ending.
+  if(CCY_DECIMALS[ccy] === 0 && !Number.isInteger(roundTo(price, 2))) return 0;
   const key = CCY_DECIMALS[ccy] === 0
     ? Math.floor(price) % 10
     : Math.round((price - Math.floor(price)) * 100);
@@ -565,12 +568,43 @@ function roundPct(v){ return (v==null||isNaN(v)) ? null : Math.round(v*100)/100;
      * CNY decimals:   CNY 98.00 @55% -> Steam 44.10, workbook 44
    The workbook is wrong on both counts. Fix it there too.
 
-   Applied PER SKU, then summed for bundles (per GG, 2026-09-02).
+   That rule is for single SKUs only. Bundles follow a different rule,
+   see BUNDLE ROUNDING below.
    ====================================================================== */
 const CCY_DECIMALS = { USD:2, EUR:2, GBP:2, CAD:2, CNY:2, RUB:0, UAH:0 };
 function floorTo(v, dp){
   const f = Math.pow(10, dp);
   return Math.floor(Number((v * f).toFixed(6))) / f;
+}
+function roundTo(v, dp){
+  const f = Math.pow(10, dp);
+  return Math.round(Number((v * f).toFixed(6))) / f;
+}
+
+/* ======================================================================
+   BUNDLE ROUNDING  —  derived from the live store, 2026-10-13
+   ----------------------------------------------------------------------
+   Steam does NOT apply the bundle extra to the sum of the SKU prices.
+   It applies it to EACH item's current sale price, ROUNDS each result to
+   the nearest minor unit (not floor), then sums:
+
+       item   = floor( list * (1 - sku_pct), CCY_DECIMALS )        (as above)
+       bundle = SUM round( item * (1 - bundle_pct), BUNDLE_DECIMALS )
+
+   Bundle precision is not the SKU precision: RUB bundles keep kopecks
+   (Supporter = 2423.50 RUB) while UAH bundles are whole hryvnia.
+
+   Verified 21/21 against store.steampowered.com ajaxresolvebundles
+   (3 bundles x 7 currencies, Custom Sale at 29/11/26). Competing rules:
+   floor(sum x (1-b)) [the old dashboard rule] 11/21, round(sum x (1-b))
+   12/21, per-item floor 8/21, floor(list x (1-sku)(1-b)) 11/21.
+   Example: Complete USD at 11% -> old rule 49.78, Steam 49.79.
+   Half-way ties (exactly .5 of a minor unit) were not observed; they
+   round up here.
+   ====================================================================== */
+const BUNDLE_DECIMALS = { USD:2, EUR:2, GBP:2, CAD:2, CNY:2, RUB:2, UAH:0 };
+function bundleItemPrice(skuSalePrice, bundlePct, ccy){
+  return roundTo(skuSalePrice * (1 - bundlePct/100), BUNDLE_DECIMALS[ccy]);
 }
 function steamRound(raw, ccy, kind){
   if(raw==null || isNaN(raw)) return raw;
@@ -581,7 +615,8 @@ function steamRound(raw, ccy, kind){
 const STEAM_ROUNDING_IMPLEMENTED = true;
 function fmt(v, ccy){
   if(v==null||isNaN(v)) return '—';
-  const decimals = WHOLE_NUMBER_CCY.has(ccy) ? 0 : 2;
+  // RUB bundles can carry kopecks (see BUNDLE ROUNDING): show them when present.
+  const decimals = WHOLE_NUMBER_CCY.has(ccy) && Number.isInteger(roundTo(v, 2)) ? 0 : 2;
   const factor = Math.pow(10, decimals);
   const rounded = Math.round(v*factor)/factor;
   return rounded.toLocaleString('en-US', { minimumFractionDigits:decimals, maximumFractionDigits:decimals });
@@ -1002,19 +1037,20 @@ function renderSteam(d){
   html += `<div class="section-title">Pinned Bundles (two-layer discount math)</div><div class="cards-grid">`;
   Object.entries(EDITIONS).forEach(([edId, ed]) => {
     const bundleExtraPct = getPct(d, ed.bundleField);
-    let sumDiscounted = 0;
+    let sumDiscounted = 0, finalPrice = 0;
     const skuRows = ed.skus.map(skuId => {
       const rawP = CATALOG[ccy][skuId];   // every SKU now has its own live price; no silent fallback
       const pctField = SKU_FIELD_MAP[skuId];
       const pct = getPct(d, pctField);
       const discP = steamRound(rawP * (1 - pct/100), ccy, 'sku');
       sumDiscounted += discP;
+      finalPrice += bundleItemPrice(discP, bundleExtraPct, ccy);
       return `<div class="sku-row">
         <span class="sku-name">${esc(SKU_LABELS[skuId])}<span class="sku-pct">−${esc(pct)}%</span></span>
         <div class="sku-price-stack"><span class="sku-price-raw">${fmt(rawP,ccy)}</span><span class="sku-price-disc">${fmt(discP,ccy)}</span></div>
       </div>`;
     }).join('');
-    const finalPrice = steamRound(sumDiscounted * (1 - bundleExtraPct/100), ccy, 'bundle');
+    finalPrice = roundTo(finalPrice, BUNDLE_DECIMALS[ccy]);   // strip float noise from the sum
 
     html += `<div class="card">
       <div class="card-head">
@@ -1024,7 +1060,7 @@ function renderSteam(d){
       </div>
       <div class="layer-math">
         <div class="layer-row"><span>Sum of discounted SKUs</span><span class="layer-val">${fmt(sumDiscounted,ccy)} ${ccy}</span></div>
-        <div class="layer-row"><span>↓ bundle discount −${bundleExtraPct}% (adjust above)</span></div>
+        <div class="layer-row"><span>↓ bundle discount −${bundleExtraPct}% on each item, rounded (adjust above)</span></div>
         <div class="final-line"><span>Final bundle price</span><span><span class="final-price">${fmt(finalPrice,ccy)}</span><span class="price-curr">${ccy}</span></span></div>
       </div>
       <div class="sku-list">${skuRows}</div>
@@ -1208,13 +1244,24 @@ function bundleSumAtCcy(ed, d, ccy){
     return sum + steamRound(raw*(1-pct/100), ccy, 'sku');
   }, 0);
 }
+/* Final bundle price as Steam computes it: the bundle extra is applied to
+   each item's sale price and rounded per item (see BUNDLE ROUNDING). */
+function bundleFinalAtCcy(ed, d, ccy, bundlePct){
+  const total = ed.skus.reduce((sum, skuId) => {
+    const raw = (CATALOG[ccy]||{})[skuId];
+    if(raw==null) return sum;
+    const pct = getPct(d, SKU_FIELD_MAP[skuId]);
+    return sum + bundleItemPrice(steamRound(raw*(1-pct/100), ccy, 'sku'), bundlePct, ccy);
+  }, 0);
+  return roundTo(total, BUNDLE_DECIMALS[ccy]);
+}
 function bundlePriceQuality(edId, pct, d){
   const ed = EDITIONS[edId];
   let score=0, clean=0, charmSeen=0;
   for(const ccy of QUALITY_CCYS){
     const sum = bundleSumAtCcy(ed, d, ccy);
     if(!sum) continue;
-    const price = steamRound(sum*(1-pct/100), ccy, 'bundle');
+    const price = bundleFinalAtCcy(ed, d, ccy, pct);
     const pts = endingScore(price, ccy);
     const charm = CHARM_CCYS.indexOf(ccy) !== -1;
     score += pts*CCY_WEIGHT[ccy];
@@ -1226,9 +1273,7 @@ function bundlePriceQuality(edId, pct, d){
    Used both by the Complete/Supporter/Campaigns closeness constraint below and
    by anything else that needs "what would this bundle actually cost." */
 function finalBundlePriceAt(edId, pct, d, ccy){
-  const ed = EDITIONS[edId];
-  const sum = bundleSumAtCcy(ed, d, ccy);
-  return steamRound(sum*(1-pct/100), ccy, 'bundle');
+  return bundleFinalAtCcy(EDITIONS[edId], d, ccy, pct);
 }
 /* closeness (optional): { ccy, nearPrice, farPrice } — used only for the
    Complete Edition, whose bundle extra must land its final price closer to
